@@ -1,0 +1,47 @@
+name: Opdater strømpriser
+
+on:
+  schedule:
+    - cron: "7 * * * *"      # hver time, 7 min over
+  workflow_dispatch:          # gør det muligt at køre den manuelt
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-prices
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Hent DK1 day-ahead priser fra Energi Data Service
+        run: |
+          mkdir -p data
+          START=$(date -u -d '36 days ago' +%F)
+          END=$(date -u -d '3 days' +%F)
+          curl -sfG --retry 3 --retry-delay 10 "https://api.energidataservice.dk/dataset/DayAheadPrices" \
+            --data-urlencode "start=$START" \
+            --data-urlencode "end=$END" \
+            --data-urlencode 'filter={"PriceArea":["DK1"]}' \
+            --data-urlencode "sort=TimeUTC asc" \
+            --data-urlencode "limit=0" -o raw.json
+          jq -e '.records | length > 0' raw.json > /dev/null || { echo "Tomt svar fra Energi Data Service"; exit 1; }
+          jq -c '{updated: (now|todate), records: [.records[] | {TimeUTC, DayAheadPriceDKK, DayAheadPriceEUR}]}' raw.json > data/prices.json
+          echo "Antal kvarterer: $(jq '.records|length' data/prices.json)"
+
+      - name: Commit hvis priserne er ændret
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
+          # Commit kun hvis selve priserne er ændret, ikke kun tidsstemplet
+          OLD=$(git show HEAD:data/prices.json 2>/dev/null | jq -c '.records' || echo "")
+          NEW=$(jq -c '.records' data/prices.json)
+          if [ "$OLD" = "$NEW" ]; then echo "Ingen nye priser, springer over"; exit 0; fi
+          git add data/prices.json
+          git commit -m "Opdater strømpriser $(date -u +%FT%H:%MZ)"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
