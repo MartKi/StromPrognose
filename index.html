@@ -302,7 +302,7 @@ async function load(){
     else if(!honest) warn.push('Gamle vejrprognoser kunne ikke hentes, så fejltallene bygger på det faktiske vejr og er for optimistiske.');
     if(warn.length) $('error').innerHTML=warn.map(w=>`<div class="err">${w}</div>`).join('');
     render();
-    $('status').textContent=`Strømpris Vestdanmark (DK1). Nye priser modtaget ${state_updated?fDay.format(new Date(state_updated))+' kl. '+fHour.format(new Date(state_updated)):'ukendt'}, kendte priser til ${fDay.format(lastKnown)} kl. ${fHour.format(lastKnown+H)}`;
+    $('status').textContent=`Strømpris Vestdanmark (DK1). Nye priser modtaget ${state_updated?fDay.format(new Date(state_updated))+' kl. '+fHour.format(new Date(state_updated)):'ukendt'}, kendte priser til ${fDay.format(lastKnown+H)} kl. ${fHour.format(lastKnown+H)}`;
   }catch(e){
     const m=e.message.replace(/(https:\/\/\S+)/,'<a href="$1" target="_blank" style="color:#fff;word-break:break-all">$1</a>');
     $('error').innerHTML=`<div class="err">Kunne ikke hente data: ${m}</div>`; console.error(e);
