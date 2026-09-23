@@ -104,14 +104,12 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-of
     <h2>Hvor god er prognosen?</h2>
     <p class="note">Modellen er testet på de seneste 3 uger, som om den var kørt kl. 12 hver dag: kun med de priser og vejrprognoser der fandtes på det tidspunkt. Den sammenlignes med den samme model uden tysk vejr og med det naive gæt "samme time for en uge siden". Fejl i øre/kWh, gennemsnit pr. time.</p>
     <table><thead><tr><th>Døgn frem</th><th>Modellens fejl</th><th>Uden tysk vejr</th><th>Naivt gæt</th><th>Bedre end naivt</th><th>Timer testet</th></tr></thead><tbody id="bt"></tbody></table>
-    <p class="note" id="btEn"></p>
   </section>
 
   <section class="panel note">
     <h2 style="color:var(--ink)">Sådan virker prognosen</h2>
     <p>Kendte priser kommer fra Energinets Energi Data Service (day ahead, DK1). De offentliggøres ca. kl. 13 for næste døgn, så resten er en prognose.</p>
     <p>Prognosen er en vægtet regressionsmodel trænet på de seneste ca. 5 ugers priser. Forklarende variable: vindkraft i Danmark (Horns Rev, Ringkøbing, Hanstholm, Anholt, Aalborg) og i Nordtyskland (tysk Nordsø, Slesvig-Holsten, Østfrisland, Brandenburg, Rügen), omregnet via en simpel effektkurve; solindstråling i Danmark og Tyskland; temperatur; time på døgnet; weekend og helligdage. Vejret kommer fra Open-Meteo. Nyere dage vægter tungest, og modellens aktuelle skævhed korrigeres over de første døgn.</p>
-    <p>For næste døgn findes også Energinets egen prognose for vind- og solproduktion i DK1. Den bruges kun, hvis den i backtesten gør prognosen bedre.</p>
     <p>Begrænsninger: modellen kender ikke gaspriser, kabelkapacitet til Norge/Sverige/Tyskland eller kraftværksrevisioner. Brug den til at se retningen (blæsende = billigt), ikke til at ramme den enkelte time.</p>
   </section>
 </main>
@@ -156,23 +154,6 @@ async function getPrices(){
   if(!ok.length) throw new Error('Ingen priser. '+res.map(x=>x.reason?.message).filter(Boolean).join('; ')+'. Kør GitHub Action "Opdater strømpriser" manuelt første gang.');
   const best=ok.sort((a,b)=>b.recs.at(-1).t-a.recs.at(-1).t)[0];
   state_updated=best.updated; return best.recs;
-}
-
-// Energinets egne vind- og solprognoser for DK1 (day ahead), i MW pr. time.
-async function getEnerginet(){
-  const j=await repoJson('data/forecasts.json'), acc=new Map();
-  for(const x of j.records){
-    const ts=x.HourUTC??x.TimeUTC, v=x.ForecastDayAhead; if(!ts||v==null) continue;
-    const t=Math.floor(Date.parse(ts+'Z')/H)*H, type=String(x.ForecastType||'');
-    const k=t+'|'+type, o=acc.get(k)||{t,type,s:0,n:0}; o.s+=v; o.n++; acc.set(k,o);   // kvarterer bliver til timesnit
-  }
-  const m=new Map();
-  for(const {t,type,s,n} of acc.values()){
-    const o=m.get(t)||{wind:0,sol:0}, low=type.toLowerCase();
-    if(low.includes('solar')) o.sol+=s/n/3000; else if(low.includes('wind')) o.wind+=s/n/5000; else continue;   // skaleret til ca. 0 til 1
-    m.set(t,o);
-  }
-  return m;
 }
 
 // Vejrpunkter. Tysk vind og sol flytter DK1-prisen lige så meget som dansk, fordi markederne er tæt koblet.
@@ -223,10 +204,9 @@ function holidays(y){
 }
 function offDay(t){const k=dayKey(t), s=holidays(+k.slice(0,4)); return isWeekend(t)||s.dk.has(k)?1:s.half.has(k)?.5:0;}
 
-function feats(t,w,en,noDE){
+function feats(t,w,noDE){
   const x=noDE?[1,w.cfDK,w.cfDK*w.cfDK,w.solDK,w.temp,offDay(t)]:[1,w.cfDK,w.cfDK*w.cfDK,w.cfDE,w.cfDE*w.cfDE,w.solDK,w.solDE,w.temp,offDay(t)];
   const h=hourDK(t); for(let k=1;k<24;k++) x.push(h===k?1:0);
-  if(en) x.push(en.wind,en.wind*en.wind,en.sol);
   return x;
 }
 
@@ -242,43 +222,41 @@ function fit(rows,lambda=2){
 }
 
 // Træner modellen på priser før `cut` og returnerer en funktion der forudsiger time t.
-// withEn: model der også bruger Energinets prognoser (kun hvor de findes). noDE: uden tysk vejr, til sammenligning.
-function trainAt(known,wx,en,cut,withEn,noDE){
-  const rows=[]; for(const r of known){ if(r.t>=cut) break; const w=wx.get(r.t), e=en.get(r.t); if(!w||(withEn&&!e)) continue;
-    rows.push({t:r.t,y:r.p,x:feats(r.t,w,withEn?e:null,noDE),w:Math.exp(-(cut-r.t)/(21*D))}); }
+// noDE: uden tysk vejr, til sammenligning i backtesten.
+function trainAt(known,wx,cut,noDE){
+  const rows=[]; for(const r of known){ if(r.t>=cut) break; const w=wx.get(r.t); if(!w) continue;
+    rows.push({t:r.t,y:r.p,x:feats(r.t,w,noDE),w:Math.exp(-(cut-r.t)/(21*D))}); }
   if(rows.length<24*14) return null;
   const pred=fit(rows), recent=rows.filter(r=>r.t>=cut-72*H), bias=recent.reduce((s,r)=>s+(r.y-pred(r.x)),0)/(recent.length||1);
-  return (t,w,e)=>pred(feats(t,w,withEn?e:null,noDE))+bias*Math.exp(-((t-cut)/H+1)/72);
+  return (t,w)=>pred(feats(t,w,noDE))+bias*Math.exp(-((t-cut)/H+1)/72);
 }
 const leadDay=(t,origin)=>Math.ceil((t-origin)/D);
 
 // Ærlig backtest: for hver af de seneste dage stilles prognosen kl. 12 dansk tid, før næste døgns priser kendes.
-// Vejret for en time N døgn frem er den prognose der fandtes N døgn før, og Energinets prognose kun for næste døgn.
-function backtest(known,wxPast,wxNow,en){
+// Vejret for en time N døgn frem er den prognose der fandtes N døgn før.
+function backtest(known,wxPast,wxNow){
   const price=new Map(known.map(r=>[r.t,r.p])), lastDay=Date.parse(dayKey(known.at(-1).t)+'T00:00:00Z');
-  const acc={}; for(let d=1;d<=7;d++) acc[d]={m:0,n:0,naive:0,nde:0}; const accEn={m:0,base:0,n:0};
+  const acc={}; for(let d=1;d<=7;d++) acc[d]={m:0,n:0,naive:0,nde:0};
   for(let k=1;k<=21;k++){
     const day=lastDay-k*D, cut=known.find(r=>r.t>=day+D-3*H&&hourDK(r.t)===0)?.t; if(!cut) continue;
-    const origin=cut-12*H, base=trainAt(known,wxNow,en,cut,false), noDE=trainAt(known,wxNow,en,cut,false,true), withEn=trainAt(known,wxNow,en,cut,true); if(!base) continue;
+    const origin=cut-12*H, base=trainAt(known,wxNow,cut), noDE=trainAt(known,wxNow,cut,true); if(!base) continue;
     for(let t=cut;t<cut+7*D;t+=H){
       const y=price.get(t), ld=leadDay(t,origin); if(y==null||ld<1||ld>7) continue;
       const w=wxPast[ld]?.get(t); if(!w) continue;
       const p=base(t,w), last=price.get(t-7*D);
       acc[ld].m+=Math.abs(p-y); acc[ld].nde+=Math.abs(noDE(t,w)-y); acc[ld].n++; if(last!=null) acc[ld].naive+=Math.abs(last-y);
-      const e=en.get(t);
-      if(withEn&&e&&t<cut+D){accEn.m+=Math.abs(withEn(t,w,e)-y); accEn.base+=Math.abs(p-y); accEn.n++;}
     }
   }
   const byLead={}; for(let d=1;d<=7;d++){const a=acc[d]; if(a.n) byLead[d]={mae:a.m/a.n,noDE:a.nde/a.n,naive:a.naive/a.n,n:a.n};}
-  return {byLead,en:accEn.n?{mae:accEn.m/accEn.n,base:accEn.base/accEn.n,n:accEn.n}:null};
+  return {byLead};
 }
 
 async function load(){
   $('error').innerHTML=''; $('status').textContent='Henter priser og vejrdata…';
   try{
     const soft=p=>p.then(v=>({v}),e=>{console.error(e);return {e};});
-    const [q,wxRes,pastRes,enRes]=await Promise.all([getPrices(),soft(getWeather()),soft(getPastForecasts()),soft(getEnerginet())]);
-    const wx=wxRes.v||new Map(), en=enRes.v||new Map();
+    const [q,wxRes,pastRes]=await Promise.all([getPrices(),soft(getWeather()),soft(getPastForecasts())]);
+    const wx=wxRes.v||new Map();
     const hourly=new Map();
     for(const r of q){const k=Math.floor(r.t/H)*H; const o=hourly.get(k)||{s:0,n:0}; o.s+=r.p;o.n++; hourly.set(k,o);}
     const known=[...hourly].map(([t,o])=>({t,p:o.s/o.n})).sort((a,b)=>a.t-b.t);
@@ -286,18 +264,17 @@ async function load(){
 
     // Uden gamle vejrprognoser falder backtesten tilbage til det faktiske vejr, som er for optimistisk
     const honest=!!pastRes.v, wxPast=pastRes.v||Object.fromEntries([1,2,3,4,5,6,7].map(d=>[d,wx]));
-    const bt=wx.size?backtest(known,wxPast,wx,en):{byLead:{},en:null};
-    const useEn=!!(bt.en&&bt.en.mae<bt.en.base);   // Energinet-modellen bruges kun hvis den slog vejrmodellen i testen
+    const bt=wx.size?backtest(known,wxPast,wx):{byLead:{}};
 
-    const fc=[], base=wx.size?trainAt(known,wx,en,cut,false):null, withEn=useEn?trainAt(known,wx,en,cut,true):null;
+    const fc=[], base=wx.size?trainAt(known,wx,cut):null;
     if(base){
       const endT=Math.floor((now+7*D)/H)*H, maeOf=ld=>bt.byLead[Math.min(7,Math.max(1,ld))]?.mae ?? bt.byLead[7]?.mae ?? 20;
-      for(let t=cut;t<=endT;t+=H){const w=wx.get(t); if(!w) continue; const e=en.get(t), ld=leadDay(t,now);
-        const m=withEn&&e?withEn(t,w,e):base(t,w), sd=maeOf(ld)*1.25;
-        fc.push({t,p:m,lo:m-1.28*sd,hi:m+1.28*sd,en:!!(withEn&&e)});}
+      for(let t=cut;t<=endT;t+=H){const w=wx.get(t); if(!w) continue; const ld=leadDay(t,now);
+        const m=base(t,w), sd=maeOf(ld)*1.25;
+        fc.push({t,p:m,lo:m-1.28*sd,hi:m+1.28*sd});}
     }
     const l13=[1,2,3].map(d=>bt.byLead[d]).filter(Boolean), mae=l13.length?l13.reduce((s,a)=>s+a.mae*a.n,0)/l13.reduce((s,a)=>s+a.n,0):NaN;
-    state={q,known,fc,mae,bt,honest,useEn,now,lastKnown};
+    state={q,known,fc,mae,bt,honest,now,lastKnown};
     const warn=[];
     if(!fc.length) warn.push(`Prognosen mangler, ${wxRes.e?'fordi vejrdata ikke kunne hentes ('+wxRes.e.message+')':'fordi der er for lidt prishistorik at træne på'}. Kendte priser vises stadig.`);
     else if(!honest) warn.push('Gamle vejrprognoser kunne ikke hentes, så fejltallene bygger på det faktiske vejr og er for optimistiske.');
@@ -316,7 +293,7 @@ function color(v,lo,hi){const s=Math.max(0,Math.min(1,(v-lo)/((hi-lo)||1)));
   return `rgb(${a.map((x,i)=>Math.round(x+(b[i]-x)*u))})`;}
 
 function render(){
-  const {q,known,fc,mae,bt,useEn,now}=state;
+  const {q,known,fc,mae,bt,now}=state;
   const cur=q.find(r=>r.t<=now&&now<r.t+15*60e3)||q.filter(r=>r.t<=now).at(-1);
   const series=[...known.filter(r=>r.t>=now-24*H).map(r=>({...r,f:false})),...fc.map(r=>({...r,f:true}))];
   const vals=series.map(r=>r.p).sort((a,b)=>a-b), pct=p=>vals[Math.floor(p*(vals.length-1))];
@@ -344,7 +321,6 @@ function render(){
   const vm=$('vat').checked?1.25:1, n0=v=>(v*vm).toFixed(0);
   $('maeNote').textContent=state.honest?'Gennemsnitlig fejl 1 til 3 døgn frem, ærlig backtest':'Gennemsnitlig fejl 1 til 3 døgn frem (faktisk vejr, for optimistisk)';
   $('bt').innerHTML=Object.entries(bt.byLead).map(([d,a])=>`<tr><td>${d}</td><td>${n0(a.mae)}</td><td>${n0(a.noDE)}</td><td>${n0(a.naive)}</td><td>${a.naive?Math.round((1-a.mae/a.naive)*100)+' %':'–'}</td><td>${a.n}</td></tr>`).join('')||'<tr><td colspan="6">Ingen backtest endnu</td></tr>';
-  $('btEn').textContent=bt.en?`Energinets vind- og solprognose for næste døgn: fejl ${n0(bt.en.mae)} øre med, ${n0(bt.en.base)} øre uden (${bt.en.n} timer). ${useEn?'Bruges derfor i prognosen.':'Bruges derfor ikke.'}`:'Energinets vind- og solprognose er ikke tilgængelig endnu.';
 
   $('days').innerHTML=dayArr.map(([k,a])=>{const ps=a.map(r=>r.p), mn=a.reduce((m,r)=>r.p<m.p?r:m), anyF=a.some(r=>r.f), allF=a.every(r=>r.f);
     return `<tr><td>${fDay.format(a[0].t)}</td><td>${fmt(ps.reduce((s,x)=>s+x,0)/ps.length)}</td><td>${fmt(Math.min(...ps))}</td><td>${fmt(Math.max(...ps))}</td><td>kl. ${fHour.format(mn.t)}</td><td><span class="tag">${allF?'Prognose':anyF?'Delvis kendt':'Kendt'}</span></td></tr>`;}).join('');

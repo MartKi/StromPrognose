@@ -9,7 +9,7 @@ await p.waitForFunction(() => document.getElementById('status').textContent !== 
 const r = await p.evaluate(() => ({
   status: document.getElementById('status').textContent,
   error: document.getElementById('error').textContent,
-  honest: state?.honest, useEn: state?.useEn, bt: state?.bt,
+  honest: state?.honest, bt: state?.bt,
 }));
 await b.close();
 const f = v => v == null ? '–' : v.toFixed(1);
@@ -21,6 +21,5 @@ for (const [d, a] of Object.entries(r.bt?.byLead || {})) {
   sm += a.mae * a.n; sd += a.noDE * a.n; sn += a.n;
 }
 if (sn) lines.push(`| Alle | ${f(sm / sn)} | ${f(sd / sn)} | ${Math.round((1 - sm / sd) * 100)} % | | ${sn} |`);
-if (r.bt?.en) lines.push('', `Energinet næste døgn: ${f(r.bt.en.mae)} med, ${f(r.bt.en.base)} uden (${r.bt.en.n} timer). Bruges: ${r.useEn ? 'ja' : 'nej'}`);
 console.log(lines.join('\n'));
 if (process.env.GITHUB_STEP_SUMMARY) (await import('fs')).appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
