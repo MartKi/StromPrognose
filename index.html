@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Strømpris Vestdanmark (DK1)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#E9EEF0; --surface:#F7F9FA; --ink:#17252E; --muted:#5B6B75; --line:#C9D3D8; --sea:#1F5C73;
+  --cheap:#2E8B57; --mid:#E0A526; --dear:#C8412E;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1A20;--surface:#16242C;--ink:#E4ECEF;--muted:#94A6AF;--line:#2A3C46;--sea:#7FB9CF}}
+:root[data-theme="dark"]{--bg:#0F1A20;--surface:#16242C;--ink:#E4ECEF;--muted:#94A6AF;--line:#2A3C46;--sea:#7FB9CF}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Archivo,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.45}
+main{max-width:1080px;margin:0 auto;padding:24px 18px 48px}
+h1{font-size:1.05rem;font-weight:600;margin:0 0 18px;color:var(--muted)}
+h2{font-size:1.15rem;font-weight:700;margin:0 0 10px}
+.hero{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:18px;align-items:end;margin-bottom:22px}
+.now{font-size:clamp(3.2rem,11vw,6.2rem);font-weight:800;line-height:.95;letter-spacing:-.03em}
+.now small{font-size:.28em;font-weight:500;letter-spacing:0;color:var(--muted);margin-left:.3em}
+.verdict{display:inline-block;margin-top:10px;padding:4px 10px;border-radius:999px;font-weight:600;color:#fff}
+.facts{display:grid;gap:10px}
+.fact{background:var(--surface);border-left:4px solid var(--sea);padding:10px 14px}
+.fact b{display:block;font-size:1.25rem}
+.fact span{color:var(--muted);font-size:.9rem}
+.panel{background:var(--surface);padding:16px;margin-bottom:18px;border:1px solid var(--line)}
+.controls{display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:.95rem}
+.controls input[type=number]{width:80px;padding:4px 6px;font:inherit;background:var(--bg);color:var(--ink);border:1px solid var(--line)}
+.chartwrap{position:relative;height:320px}
+.strip{overflow-x:auto}
+.grid{display:grid;grid-template-columns:92px repeat(24,minmax(22px,1fr));gap:2px;min-width:680px;font-size:.78rem}
+.grid .lbl{color:var(--muted);align-self:center}
+.cell{height:26px;position:relative}
+.cell.fc::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg,rgba(255,255,255,.35) 0 3px,transparent 3px 7px)}
+.cell.now{outline:2px solid var(--ink);outline-offset:-2px}
+.legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:.85rem;margin-top:10px}
+.sw{display:inline-block;width:14px;height:14px;vertical-align:-2px;margin-right:6px}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--muted);font-weight:500}
+.tag{font-size:.78rem;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.note{color:var(--muted);font-size:.88rem;max-width:72ch}
+.err{background:var(--dear);color:#fff;padding:12px 14px;margin-bottom:18px}
+button{font:inherit;padding:5px 12px;background:var(--sea);color:var(--surface);border:0;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-offset:2px}
+@media (max-width:720px){.hero{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1 id="status">Henter priser og vejrdata…</h1>
+  <div id="error"></div>
+
+  <section class="hero">
+    <div>
+      <div class="now" id="nowPrice">–<small>øre/kWh</small></div>
+      <div id="nowSub" class="note">Spotpris lige nu, DK1</div>
+      <span class="verdict" id="verdict" hidden></span>
+    </div>
+    <div class="facts">
+      <div class="fact"><b id="cheapWin">–</b><span>Billigste 3 timer i de kendte priser</span></div>
+      <div class="fact"><b id="cheapDay">–</b><span>Billigste døgn i prognosen</span></div>
+      <div class="fact"><b id="mae">–</b><span>Modellens gennemsnitlige fejl, testet på sidste 7 dage</span></div>
+    </div>
+  </section>
+
+  <div class="panel controls">
+    <label><input type="checkbox" id="vat"> Inkl. moms (25 %)</label>
+    <label>Tillæg <input type="number" id="addon" value="0" step="1"> øre/kWh</label>
+    <button id="refresh">Opdater nu</button>
+    <span class="note">Tillæg kan fx være nettarif, elafgift og leverandørens gebyr. Spotprisen alene er ekskl. alt.</span>
+  </div>
+
+  <section class="panel">
+    <h2>Timepris, i går til og med 7 dage frem</h2>
+    <div class="chartwrap"><canvas id="chart" aria-label="Graf over strømpris"></canvas></div>
+  </section>
+
+  <section class="panel">
+    <h2>Ugen time for time</h2>
+    <div class="strip"><div class="grid" id="grid"></div></div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--cheap)"></i>Billig</span>
+      <span><i class="sw" style="background:var(--mid)"></i>Middel</span>
+      <span><i class="sw" style="background:var(--dear)"></i>Dyr</span>
+      <span><i class="sw" style="background:repeating-linear-gradient(135deg,#999 0 3px,transparent 3px 7px)"></i>Prognose</span>
+      <span>Farver er relative til de viste 8 døgn</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Døgnoversigt</h2>
+    <table><thead><tr><th>Dag</th><th>Snit</th><th>Min</th><th>Max</th><th>Billigste time</th><th>Kilde</th></tr></thead><tbody id="days"></tbody></table>
+  </section>
+
+  <section class="panel note">
+    <h2 style="color:var(--ink)">Sådan virker prognosen</h2>
+    <p>Kendte priser kommer fra Energinets Energi Data Service (day ahead, DK1). De offentliggøres ca. kl. 13 for næste døgn, så resten er en prognose.</p>
+    <p>Prognosen er en vægtet regressionsmodel trænet på de seneste ca. 5 ugers priser. Forklarende variable: vindkraft (vind i 100 m højde ved Horns Rev, Ringkøbing, Hanstholm, Anholt og Aalborg, omregnet via en simpel effektkurve), solindstråling, temperatur, time på døgnet og weekend. Vejret kommer fra Open-Meteo. Nyere dage vægter tungest, og modellens aktuelle skævhed korrigeres over de første døgn.</p>
+    <p>Begrænsninger: modellen kender ikke gaspriser, kabelkapacitet til Norge/Sverige/Tyskland, kraftværksrevisioner eller helligdage. Backtesten bruger efterfølgende vejrdata, så den reelle fejl er lidt større end tallet ovenfor. Brug den til at se retningen (blæsende = billigt), ikke til at ramme den enkelte time.</p>
+  </section>
+</main>
+
+<script>
+const TZ='Europe/Copenhagen', H=3600e3, D=864e5;
+const fHour=new Intl.DateTimeFormat('da-DK',{timeZone:TZ,hour:'2-digit',minute:'2-digit'});
+const fDay=new Intl.DateTimeFormat('da-DK',{timeZone:TZ,weekday:'short',day:'numeric',month:'short'});
+const fKey=new Intl.DateTimeFormat('sv-SE',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'});
+const fH24=new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',hourCycle:'h23'});
+const fDow=new Intl.DateTimeFormat('en-GB',{timeZone:TZ,weekday:'short'});
+const hourDK=t=>+fH24.format(t)%24, dayKey=t=>fKey.format(t), isWeekend=t=>['Sat','Sun'].includes(fDow.format(t));
+const $=id=>document.getElementById(id);
+let state=null, chart=null;
+
+const disp=v=>{const a=+$('addon').value||0;return (v+a)*($('vat').checked?1.25:1);};
+const fmt=v=>disp(v).toFixed(0);
+
+async function getPrices(){
+  const ymd=d=>d.toISOString().slice(0,10);
+  const s=new Date(Date.now()-36*D), e=new Date(Date.now()+3*D);
+  const url=`https://api.energidataservice.dk/dataset/DayAheadPrices?start=${ymd(s)}&end=${ymd(e)}&filter=${encodeURIComponent(JSON.stringify({PriceArea:['DK1']}))}&sort=TimeUTC%20asc&limit=0`;
+  const r=await fetch(url); if(!r.ok) throw new Error('Energi Data Service svarede '+r.status);
+  const j=await r.json();
+  return j.records.map(x=>({t:Date.parse(x.TimeUTC+'Z'),p:(x.DayAheadPriceDKK ?? x.DayAheadPriceEUR*7.46)/10})).filter(x=>isFinite(x.p));
+}
+
+async function getWeather(){
+  const pts=[[55.53,7.87],[56.09,8.15],[57.10,8.60],[56.60,11.20],[57.05,9.92]];
+  const url=`https://api.open-meteo.com/v1/forecast?latitude=${pts.map(p=>p[0])}&longitude=${pts.map(p=>p[1])}&hourly=wind_speed_100m,shortwave_radiation,temperature_2m&wind_speed_unit=ms&timezone=UTC&past_days=36&forecast_days=9`;
+  const r=await fetch(url); if(!r.ok) throw new Error('Open-Meteo svarede '+r.status);
+  let j=await r.json(); if(!Array.isArray(j)) j=[j];
+  const cf=v=>v<3||v>25?0:v>=12?1:Math.pow((v-3)/9,3);
+  const m=new Map();
+  j[0].hourly.time.forEach((ts,i)=>{
+    const t=Date.parse(ts+'Z'); let c=0,s=0,te=0,n=0;
+    for(const loc of j){const h=loc.hourly; if(h.wind_speed_100m[i]==null) continue; c+=cf(h.wind_speed_100m[i]); s+=h.shortwave_radiation[i]||0; te+=h.temperature_2m[i]; n++;}
+    if(n) m.set(t,{cf:c/n,sol:s/n/1000,temp:te/n});
+  });
+  return m;
+}
+
+function feats(t,w){const x=[1,w.cf,w.cf*w.cf,w.sol,w.temp,isWeekend(t)?1:0]; const h=hourDK(t); for(let k=1;k<24;k++) x.push(h===k?1:0); return x;}
+
+function fit(rows,lambda=2){
+  const n=rows[0].x.length, A=Array.from({length:n},()=>new Float64Array(n)), b=new Float64Array(n);
+  for(const r of rows){for(let i=0;i<n;i++){b[i]+=r.w*r.x[i]*r.y; for(let j=0;j<n;j++) A[i][j]+=r.w*r.x[i]*r.x[j];}}
+  for(let i=1;i<n;i++) A[i][i]+=lambda;
+  for(let c=0;c<n;c++){let p=c; for(let r=c+1;r<n;r++) if(Math.abs(A[r][c])>Math.abs(A[p][c])) p=r;
+    [A[c],A[p]]=[A[p],A[c]]; [b[c],b[p]]=[b[p],b[c]];
+    for(let r=c+1;r<n;r++){const f=A[r][c]/A[c][c]; for(let k=c;k<n;k++) A[r][k]-=f*A[c][k]; b[r]-=f*b[c];}}
+  const beta=new Float64Array(n); for(let i=n-1;i>=0;i--){let s=b[i]; for(let k=i+1;k<n;k++) s-=A[i][k]*beta[k]; beta[i]=s/A[i][i];}
+  return x=>x.reduce((s,v,i)=>s+v*beta[i],0);
+}
+
+async function load(){
+  $('error').innerHTML=''; $('status').textContent='Henter priser og vejrdata…';
+  try{
+    const [q,wx]=await Promise.all([getPrices(),getWeather()]);
+    const hourly=new Map();
+    for(const r of q){const k=Math.floor(r.t/H)*H; const o=hourly.get(k)||{s:0,n:0}; o.s+=r.p;o.n++; hourly.set(k,o);}
+    const known=[...hourly].map(([t,o])=>({t,p:o.s/o.n})).sort((a,b)=>a.t-b.t);
+    const lastKnown=known.at(-1).t, now=Date.now();
+    const rows=known.filter(r=>wx.has(r.t)).map(r=>({t:r.t,y:r.p,x:feats(r.t,wx.get(r.t)),w:Math.exp(-(lastKnown-r.t)/(21*D))}));
+
+    // Backtest: træn uden sidste 7 døgn, test på dem
+    const cut=lastKnown-7*D, pred0=fit(rows.filter(r=>r.t<=cut)), test=rows.filter(r=>r.t>cut);
+    const mae=test.reduce((s,r)=>s+Math.abs(pred0(r.x)-r.y),0)/test.length;
+
+    const pred=fit(rows);
+    const recent=rows.filter(r=>r.t>lastKnown-72*H), bias=recent.reduce((s,r)=>s+(r.y-pred(r.x)),0)/recent.length;
+    const endT=Math.floor((now+7*D)/H)*H;
+    const fc=[]; for(let t=lastKnown+H;t<=endT;t+=H){const w=wx.get(t); if(!w) continue; const ah=(t-lastKnown)/H;
+      const m=pred(feats(t,w))+bias*Math.exp(-ah/72), sd=mae*1.25*(1+ah/168*0.6);
+      fc.push({t,p:m,lo:m-1.28*sd,hi:m+1.28*sd,cf:w.cf});}
+    state={q,known,fc,mae,now,lastKnown};
+    render();
+    $('status').textContent=`Strømpris Vestdanmark (DK1). Opdateret ${fHour.format(now)}, kendte priser til ${fDay.format(lastKnown)} kl. ${fHour.format(lastKnown+H)}`;
+  }catch(e){
+    $('error').innerHTML=`<div class="err">Kunne ikke hente data: ${e.message}. Tjek netforbindelsen, eller åbn siden fra en webserver (fx GitHub Pages) hvis browseren blokerer lokale filer.</div>`;
+    $('status').textContent='Ingen data';
+  }
+}
+
+function color(v,lo,hi){const s=Math.max(0,Math.min(1,(v-lo)/((hi-lo)||1)));
+  const c=[[46,139,87],[224,165,38],[200,65,46]], a=s<.5?c[0]:c[1], b=s<.5?c[1]:c[2], u=s<.5?s*2:(s-.5)*2;
+  return `rgb(${a.map((x,i)=>Math.round(x+(b[i]-x)*u))})`;}
+
+function render(){
+  const {q,known,fc,mae,now}=state;
+  const cur=q.find(r=>r.t<=now&&now<r.t+15*60e3)||q.filter(r=>r.t<=now).at(-1);
+  const series=[...known.filter(r=>r.t>=now-24*H).map(r=>({...r,f:false})),...fc.map(r=>({...r,f:true}))];
+  const vals=series.map(r=>r.p).sort((a,b)=>a-b), pct=p=>vals[Math.floor(p*(vals.length-1))];
+  const lo=pct(.1), hi=pct(.9);
+
+  $('nowPrice').innerHTML=`${fmt(cur.p)}<small>øre/kWh</small>`;
+  $('nowSub').textContent=`Kvarter fra kl. ${fHour.format(cur.t)}, ${$('vat').checked?'inkl. moms':'ekskl. moms'}${+$('addon').value?' og tillæg':''}`;
+  const v=$('verdict'); v.hidden=false;
+  const rank=vals.filter(x=>x<cur.p).length/vals.length;
+  v.textContent=rank<.33?'Billig i forhold til ugen':rank>.67?'Dyr i forhold til ugen':'Middel i forhold til ugen';
+  v.style.background=rank<.33?'var(--cheap)':rank>.67?'var(--dear)':'var(--mid)';
+
+  // Billigste 3-timers vindue i kendte kvarterpriser
+  const fut=q.filter(r=>r.t+15*60e3>now); let best=null;
+  for(let i=0;i+12<=fut.length;i++){const a=fut.slice(i,i+12).reduce((s,r)=>s+r.p,0)/12; if(!best||a<best.a) best={a,t:fut[i].t};}
+  $('cheapWin').textContent=best?`${fDay.format(best.t)} ${fHour.format(best.t)} til ${fHour.format(best.t+3*H)}, snit ${fmt(best.a)} øre`:'–';
+
+  // Døgn
+  const days=new Map(); for(const r of series){if(r.t<now-2*H&&!r.f) {} const k=dayKey(r.t); if(!days.has(k)) days.set(k,[]); days.get(k).push(r);}
+  const today=dayKey(now); const dayArr=[...days].filter(([k])=>k>=today);
+  const fcDays=dayArr.filter(([,a])=>a.every(r=>r.f)&&a.length>=20).map(([k,a])=>({k,a,avg:a.reduce((s,r)=>s+r.p,0)/a.length}));
+  const cd=fcDays.sort((a,b)=>a.avg-b.avg)[0];
+  $('cheapDay').textContent=cd?`${fDay.format(cd.a[0].t)}, ca. ${fmt(cd.avg)} øre i snit`:'–';
+  $('mae').textContent=`± ${(mae*($('vat').checked?1.25:1)).toFixed(0)} øre/kWh pr. time`;
+
+  $('days').innerHTML=dayArr.map(([k,a])=>{const ps=a.map(r=>r.p), mn=a.reduce((m,r)=>r.p<m.p?r:m), anyF=a.some(r=>r.f), allF=a.every(r=>r.f);
+    return `<tr><td>${fDay.format(a[0].t)}</td><td>${fmt(ps.reduce((s,x)=>s+x,0)/ps.length)}</td><td>${fmt(Math.min(...ps))}</td><td>${fmt(Math.max(...ps))}</td><td>kl. ${fHour.format(mn.t)}</td><td><span class="tag">${allF?'Prognose':anyF?'Delvis kendt':'Kendt'}</span></td></tr>`;}).join('');
+
+  // Heatmap
+  let g='<div></div>'+Array.from({length:24},(_,h)=>`<div class="lbl" style="text-align:center">${h%3?'':h}</div>`).join('');
+  for(const [k,a] of dayArr){const byH=new Map(a.map(r=>[hourDK(r.t),r]));
+    g+=`<div class="lbl">${fDay.format(a[0].t)}</div>`;
+    for(let h=0;h<24;h++){const r=byH.get(h);
+      g+=r?`<div class="cell${r.f?' fc':''}${now>=r.t&&now<r.t+H?' now':''}" style="background:${color(r.p,lo,hi)}" title="${fDay.format(r.t)} kl. ${fHour.format(r.t)}: ${fmt(r.p)} øre${r.f?' (prognose)':''}"></div>`:'<div></div>';}}
+  $('grid').innerHTML=g;
+
+  // Graf
+  const act=series.filter(r=>!r.f).map(r=>({x:r.t,y:disp(r.p)}));
+  const pf=fc.map(r=>({x:r.t,y:disp(r.p)})), band1=fc.map(r=>({x:r.t,y:disp(r.hi)})), band0=fc.map(r=>({x:r.t,y:disp(r.lo)}));
+  const cs=getComputedStyle(document.documentElement), ink=cs.getPropertyValue('--ink').trim(), muted=cs.getPropertyValue('--muted').trim(), sea=cs.getPropertyValue('--sea').trim(), line=cs.getPropertyValue('--line').trim();
+  const nowLine={id:'nowLine',afterDraw(c){const x=c.scales.x.getPixelForValue(now),{top,bottom}=c.chartArea,ctx=c.ctx;ctx.save();ctx.strokeStyle=ink;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,bottom);ctx.stroke();ctx.fillStyle=ink;ctx.fillText('nu',x+4,top+10);ctx.restore();}};
+  if(chart) chart.destroy();
+  chart=new Chart($('chart'),{type:'line',data:{datasets:[
+    {label:'Kendt pris',data:act,borderColor:ink,borderWidth:2,pointRadius:0,stepped:true},
+    {label:'Prognose',data:pf,borderColor:sea,borderDash:[6,4],borderWidth:2,pointRadius:0},
+    {label:'80 % interval',data:band1,borderWidth:0,pointRadius:0,backgroundColor:sea+'33',fill:'+1'},
+    {label:'_lo',data:band0,borderWidth:0,pointRadius:0}]},
+    options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      scales:{x:{type:'linear',min:now-24*H,max:now+7*D,ticks:{color:muted,stepSize:12*H,callback:v=>hourDK(v)===0?fDay.format(v):fHour.format(v)},grid:{color:line}},
+              y:{ticks:{color:muted},title:{display:true,text:'øre/kWh',color:muted},grid:{color:line}}},
+      plugins:{legend:{labels:{color:muted,filter:i=>!i.text.startsWith('_')}},
+        tooltip:{filter:i=>!i.dataset.label.startsWith('_'),callbacks:{title:i=>`${fDay.format(i[0].parsed.x)} ${fHour.format(i[0].parsed.x)}`,label:i=>`${i.dataset.label}: ${i.parsed.y.toFixed(0)} øre`}}}},
+    plugins:[nowLine]});
+}
+
+$('vat').onchange=()=>state&&render();
+$('addon').oninput=()=>state&&render();
+$('refresh').onclick=load;
+load();
+setInterval(()=>{ if(state){ state.now=Date.now(); render(); } },60e3);   // flyt "nu" hvert minut
+setInterval(load,30*60e3);                                               // hent nye data hver halve time
+</script>
+</body>
+</html>
