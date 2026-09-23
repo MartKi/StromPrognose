@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: "7 * * * *"      # hver time, 7 min over
   workflow_dispatch:          # gør det muligt at køre den manuelt
+  push:                       # kør også når selve workflowet ændres, så data findes med det samme
+    branches: [main]
+    paths: [.github/workflows/update-prices.yml]
 
 permissions:
   contents: write
