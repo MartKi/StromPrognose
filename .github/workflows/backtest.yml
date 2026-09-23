@@ -1,0 +1,29 @@
+name: Backtest
+
+# Kører sidens backtest i en rigtig browser med rigtige data og viser tabellen i kørslens oversigt
+on:
+  push:
+    branches: [main]
+    paths: [index.html, tools/backtest.mjs, .github/workflows/backtest.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Installer Playwright
+        run: |
+          npm i --no-save playwright@1
+          npx playwright install --with-deps chromium
+      - name: Kør backtest
+        run: |
+          python3 -m http.server 8000 >/dev/null 2>&1 &
+          sleep 2
+          node tools/backtest.mjs http://localhost:8000/
