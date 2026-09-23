@@ -66,5 +66,7 @@ jobs:
           done
           if [ -z "$CHANGED" ]; then echo "Ingen nye data, springer over"; exit 0; fi
           git commit -m "Opdater data:$CHANGED $(date -u +%FT%H:%MZ)"
+          # Filer hvor kun tidsstemplet er ændret smides væk, ellers nægter git at rebase
+          git checkout -- .
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
