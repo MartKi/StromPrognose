@@ -36,15 +36,35 @@ jobs:
           jq -c '{updated: (now|todate), records: [.records[] | {TimeUTC, DayAheadPriceDKK, DayAheadPriceEUR}]}' raw.json > data/prices.json
           echo "Antal kvarterer: $(jq '.records|length' data/prices.json)"
 
-      - name: Commit hvis priserne er ændret
+      - name: Hent Energinets vind- og solprognoser for DK1
+        # Må gerne fejle: siden virker uden, og priserne skal stadig opdateres
+        continue-on-error: true
+        run: |
+          START=$(date -u -d '36 days ago' +%F)
+          END=$(date -u -d '3 days' +%F)
+          curl -sfG --retry 3 --retry-delay 10 "https://api.energidataservice.dk/dataset/Forecasts_Hour" \
+            --data-urlencode "start=$START" \
+            --data-urlencode "end=$END" \
+            --data-urlencode 'filter={"PriceArea":["DK1"]}' \
+            --data-urlencode "limit=0" -o raw-fc.json
+          echo "Eksempel på en række:"; jq -c '.records[0]' raw-fc.json
+          jq -e '.records | length > 0' raw-fc.json > /dev/null || { echo "Tomt svar"; exit 1; }
+          jq -c '{updated: (now|todate), records: [.records[] | with_entries(select(.key | test("UTC$|^ForecastType$|^ForecastDayAhead$")))]}' raw-fc.json > data/forecasts.json
+          echo "Antal rækker: $(jq '.records|length' data/forecasts.json)"
+
+      - name: Commit hvis data er ændret
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
-          # Commit kun hvis selve priserne er ændret, ikke kun tidsstemplet
-          OLD=$(git show HEAD:data/prices.json 2>/dev/null | jq -c '.records' || echo "")
-          NEW=$(jq -c '.records' data/prices.json)
-          if [ "$OLD" = "$NEW" ]; then echo "Ingen nye priser, springer over"; exit 0; fi
-          git add data/prices.json
-          git commit -m "Opdater strømpriser $(date -u +%FT%H:%MZ)"
+          # Commit kun hvis selve dataene er ændret, ikke kun tidsstemplerne
+          CHANGED=""
+          for f in data/prices.json data/forecasts.json; do
+            [ -f "$f" ] || continue
+            OLD=$(git show "HEAD:$f" 2>/dev/null | jq -c '.records' || echo "")
+            NEW=$(jq -c '.records' "$f")
+            if [ "$OLD" != "$NEW" ]; then git add "$f"; CHANGED="$CHANGED $f"; fi
+          done
+          if [ -z "$CHANGED" ]; then echo "Ingen nye data, springer over"; exit 0; fi
+          git commit -m "Opdater data:$CHANGED $(date -u +%FT%H:%MZ)"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
