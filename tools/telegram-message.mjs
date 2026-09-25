@@ -21,7 +21,8 @@ export function buildMessage(state, now, { vat = false, addon = 0, url = 'https:
   const disp = p => (p + addon) * (vat ? 1.25 : 1), n = p => Math.round(disp(p));
   const rows = [...state.known.map(r => ({ t: r.t, p: r.p, f: false })),
                 ...state.fc.filter(r => r.t > state.lastKnown).map(r => ({ t: r.t, p: r.p, f: true }))];
-  const today = dayKey(now), tomorrow = dayKey(now + 24 * H + 2 * H);   // +2 t dækker sommertidsskifte
+  const today = dayKey(now);
+  let tomorrow = today; for (let t = now; tomorrow === today; t += H) tomorrow = dayKey(t);   // første time i næste døgn, også ved sommertidsskifte
   const days = [today, tomorrow].map(k => ({ k, rows: rows.filter(r => dayKey(r.t) === k) })).filter(d => d.rows.length);
   if (!days.length) return null;
 
