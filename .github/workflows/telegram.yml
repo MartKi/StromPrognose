@@ -1,0 +1,88 @@
+name: Morgenbesked på Telegram
+
+# GitHub springer ofte planlagte kørsler over eller forsinker dem, så der er fire forsøg hver morgen.
+# Kun det første, der når frem, sender; de andre ser at dagens besked er sendt og stopper.
+# Tider i UTC: 04.15 = 06.15 dansk sommertid / 05.15 vintertid.
+on:
+  schedule:
+    - cron: "15 4 * * *"
+    - cron: "45 4 * * *"
+    - cron: "15 5 * * *"
+    - cron: "45 5 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [tools/telegram.mjs, tools/telegram-message.mjs, .github/workflows/telegram.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - id: day
+        run: echo "d=$(TZ=Europe/Copenhagen date +%F)" >> "$GITHUB_OUTPUT"
+
+      - id: sent
+        if: github.event_name == 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: .telegram-sent
+          key: telegram-sent-${{ steps.day.outputs.d }}
+          lookup-only: true
+
+      - if: steps.sent.outputs.cache-hit != 'true'
+        uses: actions/checkout@v5
+
+      - if: steps.sent.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Hent de nyeste priser
+        if: steps.sent.outputs.cache-hit != 'true'
+        run: |
+          START=$(date -u -d '36 days ago' +%F)
+          END=$(date -u -d '3 days' +%F)
+          curl -sfG --retry 3 --retry-delay 10 "https://api.energidataservice.dk/dataset/DayAheadPrices" \
+            --data-urlencode "start=$START" \
+            --data-urlencode "end=$END" \
+            --data-urlencode 'filter={"PriceArea":["DK1"]}' \
+            --data-urlencode "sort=TimeUTC asc" \
+            --data-urlencode "limit=0" -o raw.json \
+          && jq -c '{updated: (now|todate), records: [.records[] | {TimeUTC, DayAheadPriceDKK, DayAheadPriceEUR}]}' raw.json > data/prices.json \
+          || echo "Kunne ikke hente friske priser, bruger dem i repoet"
+
+      - name: Installer Playwright
+        if: steps.sent.outputs.cache-hit != 'true'
+        run: |
+          npm i --no-save playwright@1
+          npx playwright install --with-deps chromium
+
+      - name: Byg og send besked
+        id: send
+        if: steps.sent.outputs.cache-hit != 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          INKL_MOMS: ${{ vars.TELEGRAM_INKL_MOMS }}
+          TILLAEG_ORE: ${{ vars.TELEGRAM_TILLAEG_ORE }}
+        run: |
+          python3 -m http.server 8000 >/dev/null 2>&1 &
+          sleep 2
+          node tools/telegram.mjs http://localhost:8000/
+
+      - name: Husk at dagens besked er sendt
+        if: github.event_name == 'schedule' && steps.send.outputs.sent == 'true'
+        run: touch .telegram-sent
+
+      - if: github.event_name == 'schedule' && steps.send.outputs.sent == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .telegram-sent
+          key: telegram-sent-${{ steps.day.outputs.d }}
