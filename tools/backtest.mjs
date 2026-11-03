@@ -4,8 +4,19 @@ const url = process.argv[2] || 'http://localhost:8000/';
 const b = await chromium.launch();
 const p = await b.newPage();
 p.on('console', m => m.type() === 'error' && console.log('browser:', m.text()));
+// Log hvor lang tid hvert kald tager, så et kald der hænger kan findes
+const started = new Map(), done = new Set(), t0 = Date.now();
+p.on('request', r => started.set(r, Date.now()));
+p.on('requestfinished', async r => { done.add(r); const res = await r.response(); console.log(`kald: ${res?.status()} ${Date.now() - started.get(r)} ms ${r.url().slice(0, 110)}`); });
+p.on('requestfailed', r => done.add(r) && console.log(`kald FEJLEDE efter ${Date.now() - started.get(r)} ms: ${r.failure()?.errorText} ${r.url().slice(0, 110)}`));
 await p.goto(url);
-await p.waitForFunction(() => document.getElementById('status').textContent !== 'Henter priser og vejrdata…', null, { timeout: 120000 });
+try {
+  await p.waitForFunction(() => document.getElementById('status').textContent !== 'Henter priser og vejrdata…', null, { timeout: 120000 });
+} catch (e) {
+  console.log(`Siden hænger efter ${Date.now() - t0} ms. Kald der stadig venter:`);
+  for (const [r, t] of started) if (!done.has(r)) console.log(`  venter (${Date.now() - t} ms): ${r.url().slice(0, 110)}`);
+  throw e;
+}
 const r = await p.evaluate(() => ({
   status: document.getElementById('status').textContent,
   error: document.getElementById('error').textContent,
