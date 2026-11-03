@@ -128,11 +128,17 @@ let state=null, chart=null, state_updated=null;
 const disp=v=>{const a=+$('addon').value||0;return (v+a)*($('vat').checked?1.25:1);};
 const fmt=v=>disp(v).toFixed(0);
 
+// Alle kald får en tidsgrænse, så et kald der hænger aldrig blokerer siden
+async function fetchT(url,ms,name){
+  try{ return await fetch(url,{signal:AbortSignal.timeout(ms)}); }
+  catch(e){ throw new Error(e.name==='TimeoutError'?`${name} svarede ikke inden for ${ms/1000} sek.`:`${name} kunne ikke nås (${e.message})`); }
+}
+
 // Filer som GitHub Action'en gemmer i repoet. Både Pages og raw.githubusercontent prøves; den nyeste vinder,
 // fordi raw får en ny commit før Pages er genudgivet.
 const RAW='https://raw.githubusercontent.com/MartKi/StromPrognose/main/';
 async function repoJson(name){
-  const get=async url=>{const r=await fetch(url+'?v='+Date.now()); if(!r.ok) throw new Error(name+': '+r.status); return r.json();};
+  const get=async url=>{const r=await fetchT(url+'?v='+Date.now(),15000,name); if(!r.ok) throw new Error(name+': '+r.status); return r.json();};
   const res=await Promise.allSettled([get(name),get(RAW+name)]);
   const ok=res.filter(x=>x.status==='fulfilled'&&x.value.records?.length).map(x=>x.value);
   if(!ok.length) throw new Error(res.map(x=>x.reason?.message).filter(Boolean)[0]||name+' er tom');
@@ -145,7 +151,7 @@ async function pricesFromApi(){
   const ymd=d=>d.toISOString().slice(0,10);
   const s=new Date(Date.now()-36*D), e=new Date(Date.now()+3*D);
   const url=`https://api.energidataservice.dk/dataset/DayAheadPrices?start=${ymd(s)}&end=${ymd(e)}&filter=${encodeURIComponent(JSON.stringify({PriceArea:['DK1']}))}&sort=TimeUTC%20asc&limit=0`;
-  const r=await fetch(url); if(!r.ok) throw new Error('Energi Data Service: '+r.status);
+  const r=await fetchT(url,15000,'Energi Data Service'); if(!r.ok) throw new Error('Energi Data Service: '+r.status);
   return {recs:toRecs(await r.json()),updated:new Date().toISOString()};
 }
 async function getPrices(){
@@ -176,18 +182,19 @@ function aggregate(j,suffix){
   return m;
 }
 const omUrl=(host,vars,extra)=>`https://${host}/v1/forecast?latitude=${PTS.map(p=>p.lat)}&longitude=${PTS.map(p=>p.lon)}&hourly=${vars.join(',')}&wind_speed_unit=ms&timezone=UTC&${extra}`;
-async function omFetch(url){
-  let r; try{ r=await fetch(url); }catch(e){ throw new Error('Open-Meteo kunne ikke nås ('+e.message+'). Test linket: '+url); }
+async function omFetch(url,ms){
+  const r=await fetchT(url,ms,'Open-Meteo');
   if(!r.ok) throw new Error('Open-Meteo svarede '+r.status+': '+(await r.text()).slice(0,200));
   const j=await r.json(); return Array.isArray(j)?j:[j];
 }
 async function getWeather(){
-  return aggregate(await omFetch(omUrl('api.open-meteo.com',['wind_speed_100m','shortwave_radiation','temperature_2m'],'past_days=36&forecast_days=9')),'');
+  return aggregate(await omFetch(omUrl('api.open-meteo.com',['wind_speed_100m','shortwave_radiation','temperature_2m'],'past_days=36&forecast_days=9'),30000),'');
 }
 // Vejrprognoser som de så ud 1 til 7 døgn før. Bruges til en ærlig backtest: modellen får kun det vejr, man kendte dengang.
+// Backtestens timer ligger højst 21 døgn tilbage, så 22 dage er nok, og kaldet holdes så let som muligt.
 async function getPastForecasts(){
   const vars=['temperature_2m']; for(let d=1;d<=7;d++) vars.push('wind_speed_100m_previous_day'+d,'shortwave_radiation_previous_day'+d);
-  const j=await omFetch(omUrl('previous-runs-api.open-meteo.com',vars,'past_days=36&forecast_days=1'));
+  const j=await omFetch(omUrl('previous-runs-api.open-meteo.com',vars,'past_days=22&forecast_days=1'),60000);
   const out={}; for(let d=1;d<=7;d++) out[d]=aggregate(j,'_previous_day'+d); return out;
 }
 
@@ -251,36 +258,48 @@ function backtest(known,wxPast,wxNow){
   return {byLead};
 }
 
+// Prognose fra nu og 7 døgn frem. Usikkerhedsbåndet bruger backtestens fejl pr. døgn frem, når den findes.
+function forecast(known,wx,bt,now){
+  const cut=known.at(-1).t+H, base=wx.size?trainAt(known,wx,cut):null, fc=[];
+  if(!base) return fc;
+  const endT=Math.floor((now+7*D)/H)*H, maeOf=ld=>bt.byLead[Math.min(7,Math.max(1,ld))]?.mae ?? bt.byLead[7]?.mae ?? 25;
+  for(let t=cut;t<=endT;t+=H){const w=wx.get(t); if(!w) continue;
+    const m=base(t,w), sd=maeOf(leadDay(t,now))*1.25;
+    fc.push({t,p:m,lo:m-1.28*sd,hi:m+1.28*sd});}
+  return fc;
+}
+const maeDays13=bt=>{const a=[1,2,3].map(d=>bt.byLead[d]).filter(Boolean); return a.length?a.reduce((s,x)=>s+x.mae*x.n,0)/a.reduce((s,x)=>s+x.n,0):NaN;};
+
+let loadId=0;
 async function load(){
+  const id=++loadId;
   $('error').innerHTML=''; $('status').textContent='Henter priser og vejrdata…';
   try{
     const soft=p=>p.then(v=>({v}),e=>{console.error(e);return {e};});
-    const [q,wxRes,pastRes]=await Promise.all([getPrices(),soft(getWeather()),soft(getPastForecasts())]);
+    // Gamle vejrprognoser er et tungt kald og bruges kun til backtesten, så siden venter ikke på dem
+    const pastP=soft(getPastForecasts());
+    const [q,wxRes]=await Promise.all([getPrices(),soft(getWeather())]);
     const wx=wxRes.v||new Map();
     const hourly=new Map();
     for(const r of q){const k=Math.floor(r.t/H)*H; const o=hourly.get(k)||{s:0,n:0}; o.s+=r.p;o.n++; hourly.set(k,o);}
     const known=[...hourly].map(([t,o])=>({t,p:o.s/o.n})).sort((a,b)=>a.t-b.t);
-    const lastKnown=known.at(-1).t, now=Date.now(), cut=lastKnown+H;
+    const lastKnown=known.at(-1).t, now=Date.now(), empty={byLead:{}};
 
-    // Uden gamle vejrprognoser falder backtesten tilbage til det faktiske vejr, som er for optimistisk
-    const honest=!!pastRes.v, wxPast=pastRes.v||Object.fromEntries([1,2,3,4,5,6,7].map(d=>[d,wx]));
-    const bt=wx.size?backtest(known,wxPast,wx):{byLead:{}};
-
-    const fc=[], base=wx.size?trainAt(known,wx,cut):null;
-    if(base){
-      const endT=Math.floor((now+7*D)/H)*H, maeOf=ld=>bt.byLead[Math.min(7,Math.max(1,ld))]?.mae ?? bt.byLead[7]?.mae ?? 20;
-      for(let t=cut;t<=endT;t+=H){const w=wx.get(t); if(!w) continue; const ld=leadDay(t,now);
-        const m=base(t,w), sd=maeOf(ld)*1.25;
-        fc.push({t,p:m,lo:m-1.28*sd,hi:m+1.28*sd});}
-    }
-    const l13=[1,2,3].map(d=>bt.byLead[d]).filter(Boolean), mae=l13.length?l13.reduce((s,a)=>s+a.mae*a.n,0)/l13.reduce((s,a)=>s+a.n,0):NaN;
-    state={q,known,fc,mae,bt,honest,now,lastKnown};
-    const warn=[];
-    if(!fc.length) warn.push(`Prognosen mangler, ${wxRes.e?'fordi vejrdata ikke kunne hentes ('+wxRes.e.message+')':'fordi der er for lidt prishistorik at træne på'}. Kendte priser vises stadig.`);
-    else if(!honest) warn.push('Gamle vejrprognoser kunne ikke hentes, så fejltallene bygger på det faktiske vejr og er for optimistiske.');
-    if(warn.length) $('error').innerHTML=warn.map(w=>`<div class="err">${w}</div>`).join('');
+    const fc=forecast(known,wx,empty,now);
+    state={q,known,fc,mae:NaN,bt:empty,honest:false,btStatus:wx.size?'pending':'failed',now,lastKnown};
+    if(!fc.length) $('error').innerHTML=`<div class="err">Prognosen mangler, ${wxRes.e?'fordi vejrdata ikke kunne hentes ('+wxRes.e.message+')':'fordi der er for lidt prishistorik at træne på'}. Kendte priser vises stadig.</div>`;
     render();
     $('status').textContent=`Strømpris Vestdanmark (DK1). Nye priser modtaget ${state_updated?fDay.format(new Date(state_updated))+' kl. '+fHour.format(new Date(state_updated)):'ukendt'}, kendte priser til ${fDay.format(lastKnown+H)} kl. ${fHour.format(lastKnown+H)}`;
+    if(!wx.size) return;
+
+    // Backtest når de gamle vejrprognoser er kommet. Uden dem bruges det faktiske vejr, som er for optimistisk.
+    const pastRes=await pastP; if(id!==loadId) return;
+    const honest=!!pastRes.v, wxPast=pastRes.v||Object.fromEntries([1,2,3,4,5,6,7].map(d=>[d,wx]));
+    await new Promise(r=>setTimeout(r));   // lad browseren tegne siden færdig før den tunge beregning
+    const bt=backtest(known,wxPast,wx);
+    Object.assign(state,{bt,honest,mae:maeDays13(bt),fc:forecast(known,wx,bt,now),btStatus:'done'});
+    if(!honest&&fc.length) $('error').innerHTML+=`<div class="err">Gamle vejrprognoser kunne ikke hentes${pastRes.e?' ('+pastRes.e.message+')':''}, så fejltallene bygger på det faktiske vejr og er for optimistiske.</div>`;
+    render();
   }catch(e){
     const m=e.message.replace(/(https:\/\/\S+)/,'<a href="$1" target="_blank" style="color:#fff;word-break:break-all">$1</a>');
     $('error').innerHTML=`<div class="err">Kunne ikke hente data: ${m}</div>`; console.error(e);
@@ -319,8 +338,8 @@ function render(){
   $('cheapDay').textContent=cd?`${fDay.format(cd.a[0].t)}, ca. ${fmt(cd.avg)} øre i snit`:'–';
   $('mae').textContent=isFinite(mae)?`± ${(mae*($('vat').checked?1.25:1)).toFixed(0)} øre/kWh pr. time`:'–';
   const vm=$('vat').checked?1.25:1, n0=v=>(v*vm).toFixed(0);
-  $('maeNote').textContent=state.honest?'Gennemsnitlig fejl 1 til 3 døgn frem, ærlig backtest':'Gennemsnitlig fejl 1 til 3 døgn frem (faktisk vejr, for optimistisk)';
-  $('bt').innerHTML=Object.entries(bt.byLead).map(([d,a])=>`<tr><td>${d}</td><td>${n0(a.mae)}</td><td>${n0(a.noDE)}</td><td>${n0(a.naive)}</td><td>${a.naive?Math.round((1-a.mae/a.naive)*100)+' %':'–'}</td><td>${a.n}</td></tr>`).join('')||'<tr><td colspan="6">Ingen backtest endnu</td></tr>';
+  $('maeNote').textContent=state.btStatus==='pending'?'Fejl 1 til 3 døgn frem: backtesten regner…':state.btStatus==='failed'?'Gennemsnitlig fejl 1 til 3 døgn frem':state.honest?'Gennemsnitlig fejl 1 til 3 døgn frem, ærlig backtest':'Gennemsnitlig fejl 1 til 3 døgn frem (faktisk vejr, for optimistisk)';
+  $('bt').innerHTML=Object.entries(bt.byLead).map(([d,a])=>`<tr><td>${d}</td><td>${n0(a.mae)}</td><td>${n0(a.noDE)}</td><td>${n0(a.naive)}</td><td>${a.naive?Math.round((1-a.mae/a.naive)*100)+' %':'–'}</td><td>${a.n}</td></tr>`).join('')||`<tr><td colspan="6">${state.btStatus==='pending'?'Backtesten regner, det tager op til et minut…':'Ingen backtest endnu'}</td></tr>`;
 
   $('days').innerHTML=dayArr.map(([k,a])=>{const ps=a.map(r=>r.p), mn=a.reduce((m,r)=>r.p<m.p?r:m), anyF=a.some(r=>r.f), allF=a.every(r=>r.f);
     return `<tr><td>${fDay.format(a[0].t)}</td><td>${fmt(ps.reduce((s,x)=>s+x,0)/ps.length)}</td><td>${fmt(Math.min(...ps))}</td><td>${fmt(Math.max(...ps))}</td><td>kl. ${fHour.format(mn.t)}</td><td><span class="tag">${allF?'Prognose':anyF?'Delvis kendt':'Kendt'}</span></td></tr>`;}).join('');

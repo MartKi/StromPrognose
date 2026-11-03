@@ -11,6 +11,8 @@ const b = await chromium.launch();
 const p = await b.newPage();
 await p.goto(url);
 await p.waitForFunction(() => document.getElementById('status').textContent !== 'Henter priser og vejrdata…', null, { timeout: 120000 });
+// Backtesten (typisk fejl) regnes efter priserne; vent på den, men send uden hvis den er for langsom
+await p.waitForFunction(() => state?.btStatus !== 'pending', null, { timeout: 90000 }).catch(() => console.log('Backtesten blev ikke færdig, sender uden fejltal.'));
 const state = await p.evaluate(() => state && { known: state.known, fc: state.fc, lastKnown: state.lastKnown, bt: state.bt });
 await b.close();
 if (!state) throw new Error('Siden kunne ikke beregne priser');
