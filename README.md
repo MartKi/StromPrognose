@@ -1,6 +1,6 @@
 # StromPrognose
 
-Strømpris for Vestdanmark (DK1): kendte day-ahead priser plus en 7-dages prognose ud fra vindvejr.
+Strømpris for Vestdanmark (DK1): kendte day-ahead priser plus en prognose op til en måned frem (vælg 7 dage, 14 dage eller 1 måned på siden).
 
 **Åbn siden:** https://martki.github.io/StromPrognose/
 
@@ -18,6 +18,8 @@ Derefter kører det selv hver time.
 ## Prognosemodellen
 
 - Regression på dansk og nordtysk vind, sol i DK og DE, temperatur, time på døgnet, weekend og helligdage.
+- **Horisont:** vejrprognosen hentes 16 døgn frem. Til dag 10 bruges den fuldt, fra dag 10 til 16 glider den over mod normalt vejr (snit af de seneste 3 uger pr. time), og efter dag 16 bruges kun normalt vejr. Langt ude viser prognosen altså prisniveau, døgnrytme og weekend, ikke vejret.
+- **Usikkerhed:** dag 1 til 7 fra backtesten; derefter vokser båndet mod modellens fejl med kun normalt vejr, målt på de seneste 2 uger.
 - **Ærlig backtest:** workflowet genskaber de seneste 3 ugers prognoser med de vejrprognoser, der fandtes dengang (Open-Meteo Previous Runs API), og sammenligner med samme model uden tysk vejr og med gættet "samme time for en uge siden".
 - `.github/workflows/backtest.yml` regner backtesten hver nat (og når siden ændres) ved at åbne siden med `?backtest=1`, og gemmer resultatet i `data/backtest.json`. Siden læser kun filen, så den ikke afhænger af Open-Meteos tjeneste for gamle prognoser. Fejler tjenesten, beholdes den forrige fil.
 

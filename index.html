@@ -30,6 +30,7 @@ h2{font-size:1.15rem;font-weight:700;margin:0 0 10px}
 .fact span{color:var(--muted);font-size:.9rem}
 .panel{background:var(--surface);padding:16px;margin-bottom:18px;border:1px solid var(--line)}
 .controls{display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:.95rem}
+.controls select{padding:4px 6px;font:inherit;background:var(--bg);color:var(--ink);border:1px solid var(--line)}
 .controls input[type=number]{width:80px;padding:4px 6px;font:inherit;background:var(--bg);color:var(--ink);border:1px solid var(--line)}
 .chartwrap{position:relative;height:320px}
 .strip{overflow-x:auto}
@@ -45,11 +46,11 @@ th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line)}
 th:first-child,td:first-child{text-align:left}
 th{color:var(--muted);font-weight:500}
 .daycards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-@media (min-width:560px){.daycards{grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media (min-width:900px){.daycards{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}}
+@media (min-width:560px){.daycards{grid-template-columns:repeat(auto-fill,minmax(118px,1fr))}}
 .daycard{background:var(--bg);border:1px solid var(--line);border-top:6px solid var(--c);padding:10px 12px}
 .daycard.fc{border-style:dashed;border-top-style:solid}
 .daycard.today{outline:2px solid var(--ink);outline-offset:-1px}
+.daycard.clim{opacity:.7}
 .daycard .d{font-size:.85rem;color:var(--muted);font-weight:600}
 .daycard .avg{font-size:1.9rem;font-weight:800;line-height:1.1;margin-top:4px}
 .daycard .avg small{font-size:.42em;font-weight:500;color:var(--muted);margin-left:.25em}
@@ -81,12 +82,13 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-of
     </div>
     <div class="facts">
       <div class="fact"><b id="cheapWin">–</b><span>Billigste 3 timer i de kendte priser</span></div>
-      <div class="fact"><b id="cheapDay">–</b><span>Billigste døgn i prognosen</span></div>
+      <div class="fact"><b id="cheapDay">–</b><span>Billigste døgn i prognosen med vejrdata</span></div>
       <div class="fact"><b id="mae">–</b><span id="maeNote">Gennemsnitlig fejl 1 til 3 døgn frem, ærlig backtest</span></div>
     </div>
   </section>
 
   <div class="panel controls">
+    <label>Vis <select id="horizon"><option value="7">7 dage</option><option value="14" selected>14 dage</option><option value="30">1 måned</option></select></label>
     <label><input type="checkbox" id="vat"> Inkl. moms (25 %)</label>
     <label>Tillæg <input type="number" id="addon" value="0" step="1"> øre/kWh</label>
     <button id="refresh">Opdater nu</button>
@@ -96,23 +98,23 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-of
   <section class="panel">
     <h2>Gennemsnitspris pr. dag</h2>
     <div class="daycards" id="dayCards"></div>
-    <p class="note">Snit af alle døgnets timer. Farven og bjælken viser, hvor billig eller dyr dagen er i forhold til de andre viste dage. Stiplet kant betyder prognose.</p>
+    <p class="note">Snit af alle døgnets timer. Farven og bjælken viser, hvor billig eller dyr dagen er i forhold til de andre viste dage. Stiplet kant betyder prognose. Falmede kort ligger ud over vejrprognosen og bygger på normalt vejr for årstiden.</p>
   </section>
 
   <section class="panel">
-    <h2>Timepris, i går til og med 7 dage frem</h2>
+    <h2>Timepris, i går til og med <span id="hzTitle">14 dage</span> frem</h2>
     <div class="chartwrap"><canvas id="chart" aria-label="Graf over strømpris"></canvas></div>
   </section>
 
   <section class="panel">
-    <h2>Ugen time for time</h2>
+    <h2>Time for time</h2>
     <div class="strip"><div class="grid" id="grid"></div></div>
     <div class="legend">
       <span><i class="sw" style="background:var(--cheap)"></i>Billig</span>
       <span><i class="sw" style="background:var(--mid)"></i>Middel</span>
       <span><i class="sw" style="background:var(--dear)"></i>Dyr</span>
       <span><i class="sw" style="background:repeating-linear-gradient(135deg,#999 0 3px,transparent 3px 7px)"></i>Prognose</span>
-      <span>Farver er relative til de viste 8 døgn</span>
+      <span id="hzLegend">Farver er relative til de viste døgn</span>
     </div>
   </section>
 
@@ -131,7 +133,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-of
     <h2 style="color:var(--ink)">Sådan virker prognosen</h2>
     <p>Kendte priser kommer fra Energinets Energi Data Service (day ahead, DK1). De offentliggøres ca. kl. 13 for næste døgn, så resten er en prognose.</p>
     <p>Prognosen er en vægtet regressionsmodel trænet på de seneste ca. 5 ugers priser. Forklarende variable: vindkraft i Danmark (Horns Rev, Ringkøbing, Hanstholm, Anholt, Aalborg) og i Nordtyskland (tysk Nordsø, Slesvig-Holsten, Østfrisland, Brandenburg, Rügen), omregnet via en simpel effektkurve; solindstråling i Danmark og Tyskland; temperatur; time på døgnet; weekend og helligdage. Vejret kommer fra Open-Meteo. Nyere dage vægter tungest, og modellens aktuelle skævhed korrigeres over de første døgn.</p>
-    <p>Begrænsninger: modellen kender ikke gaspriser, kabelkapacitet til Norge/Sverige/Tyskland eller kraftværksrevisioner. Brug den til at se retningen (blæsende = billigt), ikke til at ramme den enkelte time.</p>
+    <p>Længere frem: vejrprognosen rækker 16 døgn, men efter ca. 10 døgn er den ikke meget bedre end et gæt. Derfor glider modellen fra dag 10 til 16 gradvist over mod normalt vejr (snittet af de seneste 3 uger pr. time på døgnet), og efter dag 16 bruges kun normalt vejr. Her viser prognosen altså prisniveauet, døgnrytmen og forskellen på hverdag og weekend, ikke om det bliver en blæsende uge. Usikkerhedsbåndet vokser tilsvarende: efter dag 7 bygger det på, hvor meget modellen ramte ved siden af de seneste 2 uger, når den kun kendte normalt vejr<span id="errNormal"></span>.</p>
+    <p>Begrænsninger: modellen kender ikke gaspriser, kabelkapacitet til Norge/Sverige/Tyskland eller kraftværksrevisioner. Brug den til at se retningen (blæsende = billigt), ikke til at ramme den enkelte time. Over en måned kan især gaspris og vandstand i de nordiske magasiner flytte hele prisniveauet, og det fanger modellen ikke.</p>
   </section>
 </main>
 
@@ -148,6 +151,7 @@ let state=null, chart=null, state_updated=null;
 
 const disp=v=>{const a=+$('addon').value||0;return (v+a)*($('vat').checked?1.25:1);};
 const fmt=v=>disp(v).toFixed(0);
+const horizon=()=>+$('horizon').value||14;
 
 // Alle kald får en tidsgrænse, så et kald der hænger aldrig blokerer siden
 async function fetchT(url,ms,name){
@@ -209,7 +213,7 @@ async function omFetch(url,ms){
   const j=await r.json(); return Array.isArray(j)?j:[j];
 }
 async function getWeather(){
-  return aggregate(await omFetch(omUrl('api.open-meteo.com',['wind_speed_100m','shortwave_radiation','temperature_2m'],'past_days=36&forecast_days=9'),30000),'');
+  return aggregate(await omFetch(omUrl('api.open-meteo.com',['wind_speed_100m','shortwave_radiation','temperature_2m'],'past_days=36&forecast_days=16'),30000),'');
 }
 // Backtesten regnes én gang i døgnet af workflowet Backtest og gemmes i data/backtest.json, så siden ikke
 // afhænger af Open-Meteos tjeneste for gamle prognoser, som kan være langsom eller nede.
@@ -293,15 +297,40 @@ function backtest(known,wxPast,wxNow){
   return {byLead};
 }
 
-// Prognose fra nu og 7 døgn frem. Usikkerhedsbåndet bruger backtestens fejl pr. døgn frem, når den findes.
+// Normalt vejr: snit pr. time på døgnet over de 21 døgn før `cut`. Bruges hvor vejrprognosen ikke rækker eller ikke kan bruges.
+function normalWx(wx,cut){
+  const acc=Array.from({length:24},()=>({cfDK:0,cfDE:0,solDK:0,solDE:0,temp:0,n:0}));
+  for(const [t,w] of wx){ if(t>=cut||t<cut-21*D) continue; const a=acc[hourDK(t)]; for(const k in w) a[k]+=w[k]; a.n++; }
+  const out=acc.map(a=>a.n?{cfDK:a.cfDK/a.n,cfDE:a.cfDE/a.n,solDK:a.solDK/a.n,solDE:a.solDE/a.n,temp:a.temp/a.n}:null);
+  return t=>out[hourDK(t)];
+}
+// Hvor meget vejrprognosen tæller N døgn frem: fuldt til dag 10, derefter gradvist mod normalt vejr, intet efter dag 16.
+const FC_FULL=10, FC_END=16, MAX_DAYS=30;
+const wxWeight=ld=>ld<=FC_FULL?1:ld>=FC_END?0:(FC_END-ld)/(FC_END-FC_FULL);
+const blend=(w,n,a)=>!w?n:a>=1?w:Object.fromEntries(Object.keys(n).map(k=>[k,a*w[k]+(1-a)*n[k]]));
+
+// Fejl når modellen kun kender normalt vejr: trænet 14 døgn tilbage og testet på de 14 døgn, der fulgte.
+// Det er usikkerheden langt ude, hvor vejrprognosen ikke hjælper.
+function normalError(known,wx,cut){
+  const c0=cut-14*D, m=trainAt(known,wx,c0); if(!m) return NaN;
+  const nw=normalWx(wx,c0); let s=0,n=0;
+  for(const r of known){ if(r.t<c0||r.t>=cut) continue; const w=nw(r.t); if(!w) continue; s+=Math.abs(m(r.t,w)-r.p); n++; }
+  return n?s/n:NaN;
+}
+
+// Prognose fra nu og op til 30 døgn frem. Usikkerhedsbåndet bruger backtestens fejl pr. døgn frem til dag 7,
+// derefter vokser det mod fejlen med normalt vejr.
 function forecast(known,wx,bt,now){
   const cut=known.at(-1).t+H, base=wx.size?trainAt(known,wx,cut):null, fc=[];
-  if(!base) return fc;
-  const endT=Math.floor((now+7*D)/H)*H, maeOf=ld=>bt.byLead[Math.min(7,Math.max(1,ld))]?.mae ?? bt.byLead[7]?.mae ?? 25;
-  for(let t=cut;t<=endT;t+=H){const w=wx.get(t); if(!w) continue;
-    const m=base(t,w), sd=maeOf(leadDay(t,now))*1.25;
-    fc.push({t,p:m,lo:m-1.28*sd,hi:m+1.28*sd});}
-  return fc;
+  if(!base) return {fc,errNormal:NaN};
+  const nw=normalWx(wx,cut), mae7=bt.byLead[7]?.mae ?? 50, errN=Math.max(mae7,normalError(known,wx,cut)||mae7);
+  const maeOf=ld=>ld<=7?(bt.byLead[Math.max(1,ld)]?.mae ?? mae7):ld>=FC_END?errN:mae7+(errN-mae7)*(ld-7)/(FC_END-7);
+  const endT=Math.floor((now+MAX_DAYS*D)/H)*H;
+  for(let t=cut;t<=endT;t+=H){
+    const ld=leadDay(t,now), a=wx.has(t)?wxWeight(ld):0, w=blend(wx.get(t),nw(t),a); if(!w) continue;
+    const m=base(t,w), sd=maeOf(ld)*1.25;
+    fc.push({t,p:m,lo:m-1.28*sd,hi:m+1.28*sd,kind:a>=1?'fc':a>0?'rough':'normal'});}
+  return {fc,errNormal:errN};
 }
 const maeDays13=bt=>{const a=[1,2,3].map(d=>bt.byLead[d]).filter(Boolean); return a.length?a.reduce((s,x)=>s+x.mae*x.n,0)/a.reduce((s,x)=>s+x.n,0):NaN;};
 
@@ -319,7 +348,8 @@ async function load(){
     const lastKnown=known.at(-1).t, now=Date.now();
 
     const bt=btRes.v||{byLead:{}};
-    state={q,known,fc:forecast(known,wx,bt,now),mae:maeDays13(bt),bt,now,lastKnown,
+    const F=forecast(known,wx,bt,now);
+    state={q,known,fc:F.fc,errNormal:F.errNormal,mae:maeDays13(bt),bt,now,lastKnown,
       btStatus:BACKTEST_MODE?'pending':btRes.v?'done':'failed'};
     if(!state.fc.length) $('error').innerHTML=`<div class="err">Prognosen mangler, ${wxRes.e?'fordi vejrdata ikke kunne hentes ('+wxRes.e.message+')':'fordi der er for lidt prishistorik at træne på'}. Kendte priser vises stadig.</div>`;
     render();
@@ -331,7 +361,7 @@ async function load(){
       if(pastRes.e){ state.btStatus='failed'; state.btError=pastRes.e.message; render(); return; }
       const res=backtest(known,pastRes.v,wx);
       Object.assign(state,{bt:{...res,updated:new Date().toISOString()},btStatus:'done'});
-      state.mae=maeDays13(state.bt); state.fc=forecast(known,wx,state.bt,now);
+      state.mae=maeDays13(state.bt); Object.assign(state,(({fc,errNormal})=>({fc,errNormal}))(forecast(known,wx,state.bt,now)));
       render();
     }
   }catch(e){
@@ -346,7 +376,10 @@ function color(v,lo,hi){const s=Math.max(0,Math.min(1,(v-lo)/((hi-lo)||1)));
   return `rgb(${a.map((x,i)=>Math.round(x+(b[i]-x)*u))})`;}
 
 function render(){
-  const {q,known,fc,mae,bt,now}=state;
+  const {q,known,mae,bt,now,errNormal}=state, hz=horizon(), fc=state.fc.filter(r=>r.t<now+hz*D);
+  const hzName=hz===30?'1 måned':hz+' dage';
+  $('hzTitle').textContent=hzName; $('hzLegend').textContent=`Farver er relative til de viste ${hz+1} døgn`;
+  $('errNormal').textContent=isFinite(errNormal)?` (lige nu ca. ± ${(errNormal*($('vat').checked?1.25:1)).toFixed(0)} øre/kWh pr. time)`:'';
   const cur=q.find(r=>r.t<=now&&now<r.t+15*60e3)||q.filter(r=>r.t<=now).at(-1);
   const series=[...known.filter(r=>r.t>=now-24*H).map(r=>({...r,f:false})),...fc.map(r=>({...r,f:true}))];
   const vals=series.map(r=>r.p).sort((a,b)=>a-b), pct=p=>vals[Math.floor(p*(vals.length-1))];
@@ -356,7 +389,7 @@ function render(){
   $('nowSub').textContent=`Kvarter fra kl. ${fHour.format(cur.t)}, ${$('vat').checked?'inkl. moms':'ekskl. moms'}${+$('addon').value?' og tillæg':''}`;
   const v=$('verdict'); v.hidden=false;
   const rank=vals.filter(x=>x<cur.p).length/vals.length;
-  v.textContent=rank<.33?'Billig i forhold til ugen':rank>.67?'Dyr i forhold til ugen':'Middel i forhold til ugen';
+  v.textContent=`${rank<.33?'Billig':rank>.67?'Dyr':'Middel'} i forhold til ${hz===30?'den næste måned':'de næste '+hzName}`;
   v.style.background=rank<.33?'var(--cheap)':rank>.67?'var(--dear)':'var(--mid)';
 
   // Billigste 3-timers vindue i kendte kvarterpriser
@@ -367,7 +400,9 @@ function render(){
   // Døgn
   const days=new Map(); for(const r of series){const k=dayKey(r.t); if(!days.has(k)) days.set(k,[]); days.get(k).push(r);}
   const today=dayKey(now); const dayArr=[...days].filter(([k])=>k>=today);
-  const fcDays=dayArr.filter(([,a])=>a.every(r=>r.f)&&a.length>=20).map(([k,a])=>({k,a,avg:a.reduce((s,r)=>s+r.p,0)/a.length}));
+  const kindOf=a=>a.some(r=>r.kind==='normal')?'normal':a.some(r=>r.kind==='rough')?'rough':'fc';
+  const srcTag=a=>a.every(r=>r.f)?{fc:'Prognose',rough:'Grov prognose',normal:'Normalt vejr'}[kindOf(a)]:a.some(r=>r.f)?'Delvis kendt':'Kendt';
+  const fcDays=dayArr.filter(([,a])=>a.every(r=>r.f)&&a.length>=20&&a.every(r=>r.kind!=='normal')).map(([k,a])=>({k,a,avg:a.reduce((s,r)=>s+r.p,0)/a.length}));
   const cd=fcDays.sort((a,b)=>a.avg-b.avg)[0];
   $('cheapDay').textContent=cd?`${fDay.format(cd.a[0].t)}, ca. ${fmt(cd.avg)} øre i snit`:'–';
   $('mae').textContent=isFinite(mae)?`± ${(mae*($('vat').checked?1.25:1)).toFixed(0)} øre/kWh pr. time`:'–';
@@ -376,19 +411,19 @@ function render(){
   $('bt').innerHTML=Object.entries(bt.byLead).map(([d,a])=>`<tr><td>${d}</td><td>${n0(a.mae)}</td><td>${n0(a.noDE)}</td><td>${n0(a.naive)}</td><td>${a.naive?Math.round((1-a.mae/a.naive)*100)+' %':'–'}</td><td>${a.n}</td></tr>`).join('')||`<tr><td colspan="6">${state.btStatus==='pending'?'Backtesten regner…':'Ingen backtest endnu. Den regnes af workflowet Backtest.'}</td></tr>`;
 
   $('days').innerHTML=dayArr.map(([k,a])=>{const ps=a.map(r=>r.p), mn=a.reduce((m,r)=>r.p<m.p?r:m), anyF=a.some(r=>r.f), allF=a.every(r=>r.f);
-    return `<tr><td>${fDay.format(a[0].t)}</td><td>${fmt(ps.reduce((s,x)=>s+x,0)/ps.length)}</td><td>${fmt(Math.min(...ps))}</td><td>${fmt(Math.max(...ps))}</td><td>kl. ${fHour.format(mn.t)}</td><td><span class="tag">${allF?'Prognose':anyF?'Delvis kendt':'Kendt'}</span></td></tr>`;}).join('');
+    return `<tr><td>${fDay.format(a[0].t)}</td><td>${fmt(ps.reduce((s,x)=>s+x,0)/ps.length)}</td><td>${fmt(Math.min(...ps))}</td><td>${fmt(Math.max(...ps))}</td><td>kl. ${fHour.format(mn.t)}</td><td><span class="tag">${srcTag(a)}</span></td></tr>`;}).join('');
 
   // Dagskort med gennemsnitspris pr. dag
   const dayAvg=dayArr.map(([k,a])=>({k,a,avg:a.reduce((s,r)=>s+r.p,0)/a.length,mn:Math.min(...a.map(r=>r.p)),mx:Math.max(...a.map(r=>r.p)),allF:a.every(r=>r.f),anyF:a.some(r=>r.f)}));
   const avgs=dayAvg.map(d=>d.avg), aLo=Math.min(...avgs), aHi=Math.max(...avgs), tomorrow=dayKey(new Date(Date.parse(today+'T12:00:00Z')+D));
   $('dayCards').innerHTML=dayAvg.map(d=>{const c=color(d.avg,aLo,aHi), w=Math.max(4,Math.round(disp(d.avg)/Math.max(...avgs.map(disp))*100));
     const name=d.k===today?'I dag':d.k===tomorrow?'I morgen':fDay.format(d.a[0].t);
-    return `<div class="daycard${d.anyF?' fc':''}${d.k===today?' today':''}" style="--c:${c}" title="${fDay.format(d.a[0].t)}">
+    return `<div class="daycard${d.anyF?' fc':''}${d.k===today?' today':''}${d.allF&&kindOf(d.a)==='normal'?' clim':''}" style="--c:${c}" title="${fDay.format(d.a[0].t)}">
       <div class="d">${name}</div>
       <div class="avg">${d.anyF?'<small style="margin:0 .2em 0 0">ca.</small>':''}${fmt(d.avg)}<small>øre</small></div>
       <div class="bar"><i style="width:${w}%"></i></div>
       <div class="rng">${fmt(d.mn)} til ${fmt(d.mx)} øre</div>
-      <span class="tag">${d.allF?'Prognose':d.anyF?'Delvis kendt':'Kendt'}</span></div>`;}).join('');
+      <span class="tag">${srcTag(d.a)}</span></div>`;}).join('');
 
   // Heatmap
   let g='<div></div>'+Array.from({length:24},(_,h)=>`<div class="lbl" style="text-align:center">${h%3?'':h}</div>`).join('');
@@ -413,13 +448,15 @@ function render(){
     {label:'80 % interval',data:band1,borderWidth:0,pointRadius:0,backgroundColor:sea+'33',fill:'+1'},
     {label:'_lo',data:band0,borderWidth:0,pointRadius:0}]},
     options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-      scales:{x:{type:'linear',min:now-24*H,max:now+7*D,afterBuildTicks:ax=>{const t=[];for(let v=Math.ceil(ax.min/H)*H;v<=ax.max;v+=H){const h=hourDK(v);if(h===0||h===12)t.push({value:v});}ax.ticks=t;},ticks:{color:muted,callback:v=>hourDK(v)===0?fDay.format(v):fHour.format(v)},grid:{color:line}},
+      scales:{x:{type:'linear',min:now-24*H,max:now+hz*D,afterBuildTicks:ax=>{const t=[];for(let v=Math.ceil(ax.min/H)*H;v<=ax.max;v+=H){const h=hourDK(v);if(h===0||(hz<=7&&h===12))t.push({value:v});}ax.ticks=t;},ticks:{color:muted,callback:v=>hourDK(v)===0?fDay.format(v):fHour.format(v)},grid:{color:line}},
               y:{ticks:{color:muted},title:{display:true,text:'øre/kWh',color:muted},grid:{color:line}}},
       plugins:{legend:{labels:{color:muted,filter:i=>!i.text.startsWith('_')}},
         tooltip:{filter:i=>!i.dataset.label.startsWith('_'),callbacks:{title:i=>`${fDay.format(i[0].parsed.x)} ${fHour.format(i[0].parsed.x)}`,label:i=>`${i.dataset.label}: ${i.parsed.y.toFixed(0)} øre`}}}},
     plugins:[nowLine]});
 }
 
+try{ const h=localStorage.getItem('horizon'); if(h) $('horizon').value=h; }catch{}
+$('horizon').onchange=()=>{ try{ localStorage.setItem('horizon',$('horizon').value); }catch{} state&&render(); };
 $('vat').onchange=()=>state&&render();
 $('addon').oninput=()=>state&&render();
 $('refresh').onclick=load;
