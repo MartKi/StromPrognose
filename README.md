@@ -18,7 +18,8 @@ Derefter kører det selv hver time.
 ## Prognosemodellen
 
 - Regression på dansk og nordtysk vind, sol i DK og DE, temperatur, time på døgnet, weekend og helligdage.
-- **Horisont:** vejrprognosen hentes 16 døgn frem. Til dag 10 bruges den fuldt, fra dag 10 til 16 glider den over mod normalt vejr (snit af de seneste 3 uger pr. time), og efter dag 16 bruges kun normalt vejr. Langt ude viser prognosen altså prisniveau, døgnrytme og weekend, ikke vejret.
+- **Horisont:** vejrprognosen hentes 16 døgn frem. Til dag 10 bruges den fuldt, fra dag 10 til 16 glider den over mod en uge-tendens, og efter dag 16 bruges kun uge-tendensen.
+- **Uge-tendens:** normalt vejr (snit af de seneste 3 uger pr. time) skubbet med halvdelen af GFS-ensemblets afvigelse fra normalt (Open-Meteo Ensemble API, 31 beregninger, ca. 5 uger frem), udglattet over 7 døgn. Ensemblet kalibreres mod vejrprognosen på de første 7 døgn. Kan det ikke hentes, bruges kun normalt vejr. Dagene vises falmet, fordi de kun viser niveau, døgnrytme, weekend og en svag tendens.
 - **Usikkerhed:** dag 1 til 7 fra backtesten; derefter vokser båndet mod modellens fejl med kun normalt vejr, målt på de seneste 2 uger.
 - **Ærlig backtest:** workflowet genskaber de seneste 3 ugers prognoser med de vejrprognoser, der fandtes dengang (Open-Meteo Previous Runs API), og sammenligner med samme model uden tysk vejr og med gættet "samme time for en uge siden".
 - `.github/workflows/backtest.yml` regner backtesten hver nat (og når siden ændres) ved at åbne siden med `?backtest=1`, og gemmer resultatet i `data/backtest.json`. Siden læser kun filen, så den ikke afhænger af Open-Meteos tjeneste for gamle prognoser. Fejler tjenesten, beholdes den forrige fil.
