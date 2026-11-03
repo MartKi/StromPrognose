@@ -18,8 +18,8 @@ Derefter kører det selv hver time.
 ## Prognosemodellen
 
 - Regression på dansk og nordtysk vind, sol i DK og DE, temperatur, time på døgnet, weekend og helligdage.
-- **Ærlig backtest:** siden genskaber de seneste 3 ugers prognoser med de vejrprognoser, der fandtes dengang (Open-Meteo Previous Runs API), og sammenligner med samme model uden tysk vejr og med gættet "samme time for en uge siden".
-- `.github/workflows/backtest.yml` kører backtesten i en rigtig browser, hver gang siden ændres, og viser tabellen i kørslens oversigt.
+- **Ærlig backtest:** workflowet genskaber de seneste 3 ugers prognoser med de vejrprognoser, der fandtes dengang (Open-Meteo Previous Runs API), og sammenligner med samme model uden tysk vejr og med gættet "samme time for en uge siden".
+- `.github/workflows/backtest.yml` regner backtesten hver nat (og når siden ændres) ved at åbne siden med `?backtest=1`, og gemmer resultatet i `data/backtest.json`. Siden læser kun filen, så den ikke afhænger af Open-Meteos tjeneste for gamle prognoser. Fejler tjenesten, beholdes den forrige fil.
 
 ## Morgenbesked på Telegram
 

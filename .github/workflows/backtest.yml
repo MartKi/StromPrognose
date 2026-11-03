@@ -1,18 +1,28 @@
 name: Backtest
 
-# Kører sidens backtest i en rigtig browser med rigtige data og viser tabellen i kørslens oversigt
+# Regner sidens ærlige backtest i en rigtig browser og gemmer den i data/backtest.json, som siden læser.
+# Open-Meteos tjeneste for gamle prognoser er langsom og nogle gange nede; fejler den, beholdes den forrige fil.
+# To planlagte forsøg om natten, fordi GitHub ofte springer kørsler over.
 on:
+  schedule:
+    - cron: "40 2 * * *"
+    - cron: "40 8 * * *"
   push:
     branches: [main]
     paths: [index.html, tools/backtest.mjs, .github/workflows/backtest.yml]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: backtest
+  cancel-in-progress: true
 
 jobs:
   backtest:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -22,8 +32,18 @@ jobs:
         run: |
           npm i --no-save playwright@1
           npx playwright install --with-deps chromium
-      - name: Kør backtest
+      - name: Regn backtest
         run: |
           python3 -m http.server 8000 >/dev/null 2>&1 &
           sleep 2
-          node tools/backtest.mjs http://localhost:8000/
+          node tools/backtest.mjs "http://localhost:8000/?backtest=1"
+      - name: Gem backtest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
+          git add data/backtest.json
+          if git diff --cached --quiet; then echo "Uændret"; exit 0; fi
+          git commit -m "Opdater backtest $(date -u +%FT%H:%MZ)"
+          git checkout -- .
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

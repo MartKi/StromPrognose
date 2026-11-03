@@ -44,6 +44,19 @@ table{width:100%;border-collapse:collapse;font-size:.92rem}
 th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line)}
 th:first-child,td:first-child{text-align:left}
 th{color:var(--muted);font-weight:500}
+.daycards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (min-width:560px){.daycards{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (min-width:900px){.daycards{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}}
+.daycard{background:var(--bg);border:1px solid var(--line);border-top:6px solid var(--c);padding:10px 12px}
+.daycard.fc{border-style:dashed;border-top-style:solid}
+.daycard.today{outline:2px solid var(--ink);outline-offset:-1px}
+.daycard .d{font-size:.85rem;color:var(--muted);font-weight:600}
+.daycard .avg{font-size:1.9rem;font-weight:800;line-height:1.1;margin-top:4px}
+.daycard .avg small{font-size:.42em;font-weight:500;color:var(--muted);margin-left:.25em}
+.daycard .bar{height:6px;background:var(--line);margin:8px 0 6px}
+.daycard .bar i{display:block;height:100%;background:var(--c)}
+.daycard .rng{font-size:.78rem;color:var(--muted)}
+.daycard .tag{display:inline-block;margin-top:6px}
 .tag{font-size:.78rem;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
 .note{color:var(--muted);font-size:.88rem;max-width:72ch}
 .panel.note{max-width:none}
@@ -51,6 +64,8 @@ th{color:var(--muted);font-weight:500}
 button{font:inherit;padding:5px 12px;background:var(--sea);color:var(--surface);border:0;cursor:pointer}
 button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-offset:2px}
 @media (max-width:720px){.hero{grid-template-columns:1fr}}
+.tablewrap{overflow-x:auto}
+@media (max-width:520px){table{font-size:.8rem}th,td{padding:6px 4px}}
 </style>
 </head>
 <body>
@@ -79,6 +94,12 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-of
   </div>
 
   <section class="panel">
+    <h2>Gennemsnitspris pr. dag</h2>
+    <div class="daycards" id="dayCards"></div>
+    <p class="note">Snit af alle døgnets timer. Farven og bjælken viser, hvor billig eller dyr dagen er i forhold til de andre viste dage. Stiplet kant betyder prognose.</p>
+  </section>
+
+  <section class="panel">
     <h2>Timepris, i går til og med 7 dage frem</h2>
     <div class="chartwrap"><canvas id="chart" aria-label="Graf over strømpris"></canvas></div>
   </section>
@@ -97,13 +118,13 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-of
 
   <section class="panel">
     <h2>Døgnoversigt</h2>
-    <table><thead><tr><th>Dag</th><th>Snit</th><th>Min</th><th>Max</th><th>Billigste time</th><th>Kilde</th></tr></thead><tbody id="days"></tbody></table>
+    <div class="tablewrap"><table><thead><tr><th>Dag</th><th>Snit</th><th>Min</th><th>Max</th><th>Billigste time</th><th>Kilde</th></tr></thead><tbody id="days"></tbody></table></div>
   </section>
 
   <section class="panel">
     <h2>Hvor god er prognosen?</h2>
-    <p class="note">Modellen er testet på de seneste 3 uger, som om den var kørt kl. 12 hver dag: kun med de priser og vejrprognoser der fandtes på det tidspunkt. Den sammenlignes med den samme model uden tysk vejr og med det naive gæt "samme time for en uge siden". Fejl i øre/kWh, gennemsnit pr. time.</p>
-    <table><thead><tr><th>Døgn frem</th><th>Modellens fejl</th><th>Uden tysk vejr</th><th>Naivt gæt</th><th>Bedre end naivt</th><th>Timer testet</th></tr></thead><tbody id="bt"></tbody></table>
+    <p class="note">Modellen testes hver nat på de seneste 3 uger, som om den var kørt kl. 12 hver dag: kun med de priser og vejrprognoser der fandtes på det tidspunkt. Den sammenlignes med den samme model uden tysk vejr og med det naive gæt "samme time for en uge siden". Fejl i øre/kWh, gennemsnit pr. time.</p>
+    <div class="tablewrap"><table><thead><tr><th>Døgn frem</th><th>Modellens fejl</th><th>Uden tysk vejr</th><th>Naivt gæt</th><th>Bedre end naivt</th><th>Timer testet</th></tr></thead><tbody id="bt"></tbody></table></div>
   </section>
 
   <section class="panel note">
@@ -137,10 +158,10 @@ async function fetchT(url,ms,name){
 // Filer som GitHub Action'en gemmer i repoet. Både Pages og raw.githubusercontent prøves; den nyeste vinder,
 // fordi raw får en ny commit før Pages er genudgivet.
 const RAW='https://raw.githubusercontent.com/MartKi/StromPrognose/main/';
-async function repoJson(name){
+async function repoJson(name,valid=j=>j.records?.length){
   const get=async url=>{const r=await fetchT(url+'?v='+Date.now(),15000,name); if(!r.ok) throw new Error(name+': '+r.status); return r.json();};
   const res=await Promise.allSettled([get(name),get(RAW+name)]);
-  const ok=res.filter(x=>x.status==='fulfilled'&&x.value.records?.length).map(x=>x.value);
+  const ok=res.filter(x=>x.status==='fulfilled'&&valid(x.value)).map(x=>x.value);
   if(!ok.length) throw new Error(res.map(x=>x.reason?.message).filter(Boolean)[0]||name+' er tom');
   return ok.sort((a,b)=>Date.parse(b.updated)-Date.parse(a.updated))[0];
 }
@@ -181,7 +202,7 @@ function aggregate(j,suffix){
   });
   return m;
 }
-const omUrl=(host,vars,extra)=>`https://${host}/v1/forecast?latitude=${PTS.map(p=>p.lat)}&longitude=${PTS.map(p=>p.lon)}&hourly=${vars.join(',')}&wind_speed_unit=ms&timezone=UTC&${extra}`;
+const omUrl=(host,vars,extra,pts=PTS)=>`https://${host}/v1/forecast?latitude=${pts.map(p=>p.lat)}&longitude=${pts.map(p=>p.lon)}&hourly=${vars.join(',')}&wind_speed_unit=ms&timezone=UTC&${extra}`;
 async function omFetch(url,ms){
   const r=await fetchT(url,ms,'Open-Meteo');
   if(!r.ok) throw new Error('Open-Meteo svarede '+r.status+': '+(await r.text()).slice(0,200));
@@ -190,12 +211,26 @@ async function omFetch(url,ms){
 async function getWeather(){
   return aggregate(await omFetch(omUrl('api.open-meteo.com',['wind_speed_100m','shortwave_radiation','temperature_2m'],'past_days=36&forecast_days=9'),30000),'');
 }
-// Vejrprognoser som de så ud 1 til 7 døgn før. Bruges til en ærlig backtest: modellen får kun det vejr, man kendte dengang.
-// Backtestens timer ligger højst 21 døgn tilbage, så 22 dage er nok, og kaldet holdes så let som muligt.
+// Backtesten regnes én gang i døgnet af workflowet Backtest og gemmes i data/backtest.json, så siden ikke
+// afhænger af Open-Meteos tjeneste for gamle prognoser, som kan være langsom eller nede.
+// Workflowet åbner siden med ?backtest=1; så hentes de gamle prognoser og backtesten regnes her i browseren.
+const BACKTEST_MODE=new URLSearchParams(location.search).has('backtest');
+
+// Vejrprognoser som de så ud 1 til 7 døgn før, så modellen kun får det vejr, man kendte dengang.
+// Ét punkt ad gangen med flere forsøg, fordi tjenesten har svært ved store kald. Backtestens timer ligger højst 21 døgn tilbage.
 async function getPastForecasts(){
   const vars=['temperature_2m']; for(let d=1;d<=7;d++) vars.push('wind_speed_100m_previous_day'+d,'shortwave_radiation_previous_day'+d);
-  const j=await omFetch(omUrl('previous-runs-api.open-meteo.com',vars,'past_days=22&forecast_days=1'),60000);
+  const one=async pt=>{
+    for(let i=1;;i++){
+      try{ return (await omFetch(omUrl('previous-runs-api.open-meteo.com',vars,'past_days=22&forecast_days=1',[pt]),120000))[0]; }
+      catch(e){ if(i>=3) throw e; console.error(`Forsøg ${i} fejlede for ${pt.lat},${pt.lon}: ${e.message}`); await new Promise(r=>setTimeout(r,10000*i)); }
+    }
+  };
+  const j=[]; for(const pt of PTS) j.push(await one(pt));
   const out={}; for(let d=1;d<=7;d++) out[d]=aggregate(j,'_previous_day'+d); return out;
+}
+async function getBacktest(){
+  return repoJson('data/backtest.json',j=>j.byLead&&Object.keys(j.byLead).length);
 }
 
 // Helligdage. Danske tæller som søndag; tyske (når det ikke er dansk fridag) og grundlovsdag som en halv.
@@ -276,30 +311,29 @@ async function load(){
   $('error').innerHTML=''; $('status').textContent='Henter priser og vejrdata…';
   try{
     const soft=p=>p.then(v=>({v}),e=>{console.error(e);return {e};});
-    // Gamle vejrprognoser er et tungt kald og bruges kun til backtesten, så siden venter ikke på dem
-    const pastP=soft(getPastForecasts());
-    const [q,wxRes]=await Promise.all([getPrices(),soft(getWeather())]);
+    const [q,wxRes,btRes]=await Promise.all([getPrices(),soft(getWeather()),BACKTEST_MODE?{}:soft(getBacktest())]);
     const wx=wxRes.v||new Map();
     const hourly=new Map();
     for(const r of q){const k=Math.floor(r.t/H)*H; const o=hourly.get(k)||{s:0,n:0}; o.s+=r.p;o.n++; hourly.set(k,o);}
     const known=[...hourly].map(([t,o])=>({t,p:o.s/o.n})).sort((a,b)=>a.t-b.t);
-    const lastKnown=known.at(-1).t, now=Date.now(), empty={byLead:{}};
+    const lastKnown=known.at(-1).t, now=Date.now();
 
-    const fc=forecast(known,wx,empty,now);
-    state={q,known,fc,mae:NaN,bt:empty,honest:false,btStatus:wx.size?'pending':'failed',now,lastKnown};
-    if(!fc.length) $('error').innerHTML=`<div class="err">Prognosen mangler, ${wxRes.e?'fordi vejrdata ikke kunne hentes ('+wxRes.e.message+')':'fordi der er for lidt prishistorik at træne på'}. Kendte priser vises stadig.</div>`;
+    const bt=btRes.v||{byLead:{}};
+    state={q,known,fc:forecast(known,wx,bt,now),mae:maeDays13(bt),bt,now,lastKnown,
+      btStatus:BACKTEST_MODE?'pending':btRes.v?'done':'failed'};
+    if(!state.fc.length) $('error').innerHTML=`<div class="err">Prognosen mangler, ${wxRes.e?'fordi vejrdata ikke kunne hentes ('+wxRes.e.message+')':'fordi der er for lidt prishistorik at træne på'}. Kendte priser vises stadig.</div>`;
     render();
     $('status').textContent=`Strømpris Vestdanmark (DK1). Nye priser modtaget ${state_updated?fDay.format(new Date(state_updated))+' kl. '+fHour.format(new Date(state_updated)):'ukendt'}, kendte priser til ${fDay.format(lastKnown+H)} kl. ${fHour.format(lastKnown+H)}`;
-    if(!wx.size) return;
 
-    // Backtest når de gamle vejrprognoser er kommet. Uden dem bruges det faktiske vejr, som er for optimistisk.
-    const pastRes=await pastP; if(id!==loadId) return;
-    const honest=!!pastRes.v, wxPast=pastRes.v||Object.fromEntries([1,2,3,4,5,6,7].map(d=>[d,wx]));
-    await new Promise(r=>setTimeout(r));   // lad browseren tegne siden færdig før den tunge beregning
-    const bt=backtest(known,wxPast,wx);
-    Object.assign(state,{bt,honest,mae:maeDays13(bt),fc:forecast(known,wx,bt,now),btStatus:'done'});
-    if(!honest&&fc.length) $('error').innerHTML+=`<div class="err">Gamle vejrprognoser kunne ikke hentes${pastRes.e?' ('+pastRes.e.message+')':''}, så fejltallene bygger på det faktiske vejr og er for optimistiske.</div>`;
-    render();
+    if(BACKTEST_MODE&&wx.size){
+      // Kun ærlig backtest gemmes; fejler de gamle prognoser, beholder workflowet den forrige fil
+      const pastRes=await soft(getPastForecasts()); if(id!==loadId) return;
+      if(pastRes.e){ state.btStatus='failed'; state.btError=pastRes.e.message; render(); return; }
+      const res=backtest(known,pastRes.v,wx);
+      Object.assign(state,{bt:{...res,updated:new Date().toISOString()},btStatus:'done'});
+      state.mae=maeDays13(state.bt); state.fc=forecast(known,wx,state.bt,now);
+      render();
+    }
   }catch(e){
     const m=e.message.replace(/(https:\/\/\S+)/,'<a href="$1" target="_blank" style="color:#fff;word-break:break-all">$1</a>');
     $('error').innerHTML=`<div class="err">Kunne ikke hente data: ${m}</div>`; console.error(e);
@@ -338,11 +372,23 @@ function render(){
   $('cheapDay').textContent=cd?`${fDay.format(cd.a[0].t)}, ca. ${fmt(cd.avg)} øre i snit`:'–';
   $('mae').textContent=isFinite(mae)?`± ${(mae*($('vat').checked?1.25:1)).toFixed(0)} øre/kWh pr. time`:'–';
   const vm=$('vat').checked?1.25:1, n0=v=>(v*vm).toFixed(0);
-  $('maeNote').textContent=state.btStatus==='pending'?'Fejl 1 til 3 døgn frem: backtesten regner…':state.btStatus==='failed'?'Gennemsnitlig fejl 1 til 3 døgn frem':state.honest?'Gennemsnitlig fejl 1 til 3 døgn frem, ærlig backtest':'Gennemsnitlig fejl 1 til 3 døgn frem (faktisk vejr, for optimistisk)';
-  $('bt').innerHTML=Object.entries(bt.byLead).map(([d,a])=>`<tr><td>${d}</td><td>${n0(a.mae)}</td><td>${n0(a.noDE)}</td><td>${n0(a.naive)}</td><td>${a.naive?Math.round((1-a.mae/a.naive)*100)+' %':'–'}</td><td>${a.n}</td></tr>`).join('')||`<tr><td colspan="6">${state.btStatus==='pending'?'Backtesten regner, det tager op til et minut…':'Ingen backtest endnu'}</td></tr>`;
+  $('maeNote').textContent=bt.updated?`Gennemsnitlig fejl 1 til 3 døgn frem, ærlig backtest fra ${fDay.format(new Date(bt.updated))}`:'Gennemsnitlig fejl 1 til 3 døgn frem';
+  $('bt').innerHTML=Object.entries(bt.byLead).map(([d,a])=>`<tr><td>${d}</td><td>${n0(a.mae)}</td><td>${n0(a.noDE)}</td><td>${n0(a.naive)}</td><td>${a.naive?Math.round((1-a.mae/a.naive)*100)+' %':'–'}</td><td>${a.n}</td></tr>`).join('')||`<tr><td colspan="6">${state.btStatus==='pending'?'Backtesten regner…':'Ingen backtest endnu. Den regnes af workflowet Backtest.'}</td></tr>`;
 
   $('days').innerHTML=dayArr.map(([k,a])=>{const ps=a.map(r=>r.p), mn=a.reduce((m,r)=>r.p<m.p?r:m), anyF=a.some(r=>r.f), allF=a.every(r=>r.f);
     return `<tr><td>${fDay.format(a[0].t)}</td><td>${fmt(ps.reduce((s,x)=>s+x,0)/ps.length)}</td><td>${fmt(Math.min(...ps))}</td><td>${fmt(Math.max(...ps))}</td><td>kl. ${fHour.format(mn.t)}</td><td><span class="tag">${allF?'Prognose':anyF?'Delvis kendt':'Kendt'}</span></td></tr>`;}).join('');
+
+  // Dagskort med gennemsnitspris pr. dag
+  const dayAvg=dayArr.map(([k,a])=>({k,a,avg:a.reduce((s,r)=>s+r.p,0)/a.length,mn:Math.min(...a.map(r=>r.p)),mx:Math.max(...a.map(r=>r.p)),allF:a.every(r=>r.f),anyF:a.some(r=>r.f)}));
+  const avgs=dayAvg.map(d=>d.avg), aLo=Math.min(...avgs), aHi=Math.max(...avgs), tomorrow=dayKey(new Date(Date.parse(today+'T12:00:00Z')+D));
+  $('dayCards').innerHTML=dayAvg.map(d=>{const c=color(d.avg,aLo,aHi), w=Math.max(4,Math.round(disp(d.avg)/Math.max(...avgs.map(disp))*100));
+    const name=d.k===today?'I dag':d.k===tomorrow?'I morgen':fDay.format(d.a[0].t);
+    return `<div class="daycard${d.anyF?' fc':''}${d.k===today?' today':''}" style="--c:${c}" title="${fDay.format(d.a[0].t)}">
+      <div class="d">${name}</div>
+      <div class="avg">${d.anyF?'<small style="margin:0 .2em 0 0">ca.</small>':''}${fmt(d.avg)}<small>øre</small></div>
+      <div class="bar"><i style="width:${w}%"></i></div>
+      <div class="rng">${fmt(d.mn)} til ${fmt(d.mx)} øre</div>
+      <span class="tag">${d.allF?'Prognose':d.anyF?'Delvis kendt':'Kendt'}</span></div>`;}).join('');
 
   // Heatmap
   let g='<div></div>'+Array.from({length:24},(_,h)=>`<div class="lbl" style="text-align:center">${h%3?'':h}</div>`).join('');
@@ -354,6 +400,8 @@ function render(){
 
   // Graf
   const act=series.filter(r=>!r.f).map(r=>({x:r.t,y:disp(r.p)}));
+  const allDays=new Map(); for(const r of [...known,...fc]){const k=dayKey(r.t), o=allDays.get(k)||{s:0,n:0}; o.s+=r.p; o.n++; allDays.set(k,o);}   // hele døgn, også i går
+  const dAvg=new Map([...allDays].map(([k,o])=>[k,o.s/o.n])), avgLine=series.map(r=>({x:r.t,y:disp(dAvg.get(dayKey(r.t)))}));
   const pf=fc.map(r=>({x:r.t,y:disp(r.p)})), band1=fc.map(r=>({x:r.t,y:disp(r.hi)})), band0=fc.map(r=>({x:r.t,y:disp(r.lo)}));
   const cs=getComputedStyle(document.documentElement), ink=cs.getPropertyValue('--ink').trim(), muted=cs.getPropertyValue('--muted').trim(), sea=cs.getPropertyValue('--sea').trim(), line=cs.getPropertyValue('--line').trim();
   const nowLine={id:'nowLine',afterDraw(c){const x=c.scales.x.getPixelForValue(now),{top,bottom}=c.chartArea,ctx=c.ctx;ctx.save();ctx.strokeStyle=ink;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,bottom);ctx.stroke();ctx.fillStyle=ink;ctx.fillText('nu',x+4,top+10);ctx.restore();}};
@@ -361,6 +409,7 @@ function render(){
   chart=new Chart($('chart'),{type:'line',data:{datasets:[
     {label:'Kendt pris',data:act,borderColor:ink,borderWidth:2,pointRadius:0,stepped:true},
     {label:'Prognose',data:pf,borderColor:sea,borderDash:[6,4],borderWidth:2,pointRadius:0},
+    {label:'Døgnsnit',data:avgLine,borderColor:muted,borderWidth:2,borderDash:[2,3],pointRadius:0,stepped:true},
     {label:'80 % interval',data:band1,borderWidth:0,pointRadius:0,backgroundColor:sea+'33',fill:'+1'},
     {label:'_lo',data:band0,borderWidth:0,pointRadius:0}]},
     options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},

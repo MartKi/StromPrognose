@@ -1,39 +1,30 @@
-// Åbner siden i en rigtig browser og skriver backtest-tabellen ud. Bruges af .github/workflows/backtest.yml.
+// Åbner siden med ?backtest=1 i en rigtig browser, så den henter Open-Meteos gamle prognoser og regner backtesten.
+// Resultatet gemmes i data/backtest.json, som siden læser. Bruges af .github/workflows/backtest.yml.
 import { chromium } from 'playwright';
-const url = process.argv[2] || 'http://localhost:8000/';
+import { writeFileSync, appendFileSync } from 'fs';
+const url = process.argv[2] || 'http://localhost:8000/?backtest=1';
 const b = await chromium.launch();
 const p = await b.newPage();
-p.on('console', m => m.type() === 'error' && console.log('browser:', m.text()));
-// Log hvor lang tid hvert kald tager, så et kald der hænger kan findes
-const started = new Map(), done = new Set(), t0 = Date.now();
-p.on('request', r => started.set(r, Date.now()));
-p.on('requestfinished', async r => { done.add(r); const res = await r.response(); console.log(`kald: ${res?.status()} ${Date.now() - started.get(r)} ms ${r.url().slice(0, 110)}`); });
-p.on('requestfailed', r => done.add(r) && console.log(`kald FEJLEDE efter ${Date.now() - started.get(r)} ms: ${r.failure()?.errorText} ${r.url().slice(0, 110)}`));
+const t0 = Date.now(), sec = () => ((Date.now() - t0) / 1000).toFixed(1) + ' s';
+p.on('console', m => m.type() === 'error' && console.log(`[${sec()}] browser:`, m.text().slice(0, 200)));
+p.on('requestfailed', r => console.log(`[${sec()}] kald fejlede: ${r.failure()?.errorText} ${r.url().slice(0, 100)}`));
 await p.goto(url);
-try {
-  await p.waitForFunction(() => document.getElementById('status').textContent !== 'Henter priser og vejrdata…', null, { timeout: 120000 });
-  console.log(`Priser og prognose vist efter ${Date.now() - t0} ms`);
-  await p.waitForFunction(() => state?.btStatus !== 'pending', null, { timeout: 120000 });
-  console.log(`Backtest færdig efter ${Date.now() - t0} ms`);
-} catch (e) {
-  console.log(`Siden hænger efter ${Date.now() - t0} ms. Kald der stadig venter:`);
-  for (const [r, t] of started) if (!done.has(r)) console.log(`  venter (${Date.now() - t} ms): ${r.url().slice(0, 110)}`);
-  throw e;
-}
-const r = await p.evaluate(() => ({
-  status: document.getElementById('status').textContent,
-  error: document.getElementById('error').textContent,
-  honest: state?.honest, bt: state?.bt,
-}));
+await p.waitForFunction(() => document.getElementById('status').textContent !== 'Henter priser og vejrdata…', null, { timeout: 120000 });
+console.log(`[${sec()}] Priser og prognose vist`);
+await p.waitForFunction(() => state?.btStatus !== 'pending', null, { timeout: 30 * 60e3 });
+const r = await p.evaluate(() => ({ status: state.btStatus, error: state.btError, bt: state.bt }));
 await b.close();
+if (r.status !== 'done') { console.log(`Backtesten fejlede: ${r.error}. data/backtest.json beholdes uændret.`); process.exit(1); }
+console.log(`[${sec()}] Backtest færdig`);
+
+writeFileSync('data/backtest.json', JSON.stringify(r.bt) + '\n');
 const f = v => v == null ? '–' : v.toFixed(1);
-const lines = [`Status: ${r.status}`, r.error ? `Fejl: ${r.error}` : '', `Ærlig backtest: ${r.honest ? 'ja' : 'nej'}`, '',
-  '| Døgn frem | Med tysk vejr | Uden tysk vejr | Forskel | Naivt | Timer |', '|---|---|---|---|---|---|'];
+const lines = ['| Døgn frem | Med tysk vejr | Uden tysk vejr | Forskel | Naivt | Timer |', '|---|---|---|---|---|---|'];
 let sm = 0, sd = 0, sn = 0;
-for (const [d, a] of Object.entries(r.bt?.byLead || {})) {
+for (const [d, a] of Object.entries(r.bt.byLead)) {
   lines.push(`| ${d} | ${f(a.mae)} | ${f(a.noDE)} | ${Math.round((1 - a.mae / a.noDE) * 100)} % | ${f(a.naive)} | ${a.n} |`);
   sm += a.mae * a.n; sd += a.noDE * a.n; sn += a.n;
 }
 if (sn) lines.push(`| Alle | ${f(sm / sn)} | ${f(sd / sn)} | ${Math.round((1 - sm / sd) * 100)} % | | ${sn} |`);
 console.log(lines.join('\n'));
-if (process.env.GITHUB_STEP_SUMMARY) (await import('fs')).appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
