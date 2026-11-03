@@ -12,6 +12,9 @@ p.on('requestfailed', r => done.add(r) && console.log(`kald FEJLEDE efter ${Date
 await p.goto(url);
 try {
   await p.waitForFunction(() => document.getElementById('status').textContent !== 'Henter priser og vejrdata…', null, { timeout: 120000 });
+  console.log(`Priser og prognose vist efter ${Date.now() - t0} ms`);
+  await p.waitForFunction(() => state?.btStatus !== 'pending', null, { timeout: 120000 });
+  console.log(`Backtest færdig efter ${Date.now() - t0} ms`);
 } catch (e) {
   console.log(`Siden hænger efter ${Date.now() - t0} ms. Kald der stadig venter:`);
   for (const [r, t] of started) if (!done.has(r)) console.log(`  venter (${Date.now() - t} ms): ${r.url().slice(0, 110)}`);
