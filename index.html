@@ -39,6 +39,7 @@ h2{font-size:1.15rem;font-weight:700;margin:0 0 10px}
 .cell{height:26px;position:relative}
 .cell.fc::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg,rgba(255,255,255,.35) 0 3px,transparent 3px 7px)}
 .cell.now{outline:2px solid var(--ink);outline-offset:-2px}
+.cell.far,.sw.far{filter:saturate(.25);opacity:.5}
 .legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:.85rem;margin-top:10px}
 .sw{display:inline-block;width:14px;height:14px;vertical-align:-2px;margin-right:6px}
 table{width:100%;border-collapse:collapse;font-size:.92rem}
@@ -98,7 +99,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-of
   <section class="panel">
     <h2>Gennemsnitspris pr. dag</h2>
     <div class="daycards" id="dayCards"></div>
-    <p class="note">Snit af alle døgnets timer. Farven og bjælken viser, hvor billig eller dyr dagen er i forhold til de andre viste dage. Stiplet kant betyder prognose. Falmede kort ligger ud over vejrprognosen og bygger på normalt vejr for årstiden.</p>
+    <p class="note">Snit af alle døgnets timer. Farven og bjælken viser, hvor billig eller dyr dagen er i forhold til de andre viste dage. Stiplet kant betyder prognose. Falmede kort ligger ud over den brugbare vejrprognose: de viser kun en uge-tendens, ikke vejret dag for dag.</p>
   </section>
 
   <section class="panel">
@@ -114,6 +115,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-of
       <span><i class="sw" style="background:var(--mid)"></i>Middel</span>
       <span><i class="sw" style="background:var(--dear)"></i>Dyr</span>
       <span><i class="sw" style="background:repeating-linear-gradient(135deg,#999 0 3px,transparent 3px 7px)"></i>Prognose</span>
+      <span><i class="sw far" style="background:var(--mid)"></i>Falmet: kun uge-tendens, døgnrytme og weekend</span>
       <span id="hzLegend">Farver er relative til de viste døgn</span>
     </div>
   </section>
@@ -133,7 +135,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--sea);outline-of
     <h2 style="color:var(--ink)">Sådan virker prognosen</h2>
     <p>Kendte priser kommer fra Energinets Energi Data Service (day ahead, DK1). De offentliggøres ca. kl. 13 for næste døgn, så resten er en prognose.</p>
     <p>Prognosen er en vægtet regressionsmodel trænet på de seneste ca. 5 ugers priser. Forklarende variable: vindkraft i Danmark (Horns Rev, Ringkøbing, Hanstholm, Anholt, Aalborg) og i Nordtyskland (tysk Nordsø, Slesvig-Holsten, Østfrisland, Brandenburg, Rügen), omregnet via en simpel effektkurve; solindstråling i Danmark og Tyskland; temperatur; time på døgnet; weekend og helligdage. Vejret kommer fra Open-Meteo. Nyere dage vægter tungest, og modellens aktuelle skævhed korrigeres over de første døgn.</p>
-    <p>Længere frem: vejrprognosen rækker 16 døgn, men efter ca. 10 døgn er den ikke meget bedre end et gæt. Derfor glider modellen fra dag 10 til 16 gradvist over mod normalt vejr (snittet af de seneste 3 uger pr. time på døgnet), og efter dag 16 bruges kun normalt vejr. Her viser prognosen altså prisniveauet, døgnrytmen og forskellen på hverdag og weekend, ikke om det bliver en blæsende uge. Usikkerhedsbåndet vokser tilsvarende: efter dag 7 bygger det på, hvor meget modellen ramte ved siden af de seneste 2 uger, når den kun kendte normalt vejr<span id="errNormal"></span>.</p>
+    <p>Længere frem: vejrprognosen rækker 16 døgn, men efter ca. 10 døgn er den ikke meget bedre end et gæt. Derfor glider modellen fra dag 10 til 16 gradvist over mod en uge-tendens, og efter dag 16 bruges kun uge-tendensen. Den bygger på normalt vejr (snittet af de seneste 3 uger pr. time på døgnet), skubbet lidt op eller ned efter, om GFS-ensemblet (31 vejrberegninger fra den amerikanske vejrtjeneste, ca. 5 uger frem) ser en uge som mere eller mindre blæsende og kold end normalt. Afvigelsen udglattes over 7 dage og halveres, fordi vind 3 til 4 uger frem kun kan forudsiges svagt. Langt ude viser prognosen altså prisniveauet, døgnrytmen, weekend og en svag uge-tendens, ikke hvilke dage det blæser. <span id="trendStatus"></span> Usikkerhedsbåndet vokser tilsvarende: efter dag 7 bygger det på, hvor meget modellen ramte ved siden af de seneste 2 uger, når den kun kendte normalt vejr<span id="errNormal"></span>.</p>
     <p>Begrænsninger: modellen kender ikke gaspriser, kabelkapacitet til Norge/Sverige/Tyskland eller kraftværksrevisioner. Brug den til at se retningen (blæsende = billigt), ikke til at ramme den enkelte time. Over en måned kan især gaspris og vandstand i de nordiske magasiner flytte hele prisniveauet, og det fanger modellen ikke.</p>
   </section>
 </main>
@@ -211,6 +213,24 @@ async function omFetch(url,ms){
   const r=await fetchT(url,ms,'Open-Meteo');
   if(!r.ok) throw new Error('Open-Meteo svarede '+r.status+': '+(await r.text()).slice(0,200));
   const j=await r.json(); return Array.isArray(j)?j:[j];
+}
+const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
+// GFS-ensemblet (31 beregninger, ca. 5 uger frem). Bruges kun som uge-tendens efter dag 10.
+// Kun vindpunkterne hentes, og kun vind og temperatur, så svaret ikke bliver for stort.
+async function getEnsemble(){
+  const pts=PTS.filter(p=>p.wind);
+  const j=await omFetch(omUrl('ensemble-api.open-meteo.com',['wind_speed_100m','temperature_2m'],'models=gfs05&forecast_days=32',pts),45000);
+  const m=new Map();
+  j[0].hourly.time.forEach((ts,i)=>{
+    const g={dk:[],de:[],te:[]};
+    j.forEach((loc,k)=>{ const p=pts[k], h=loc.hourly;
+      for(const key in h){ const v=h[key]?.[i]; if(v==null) continue;
+        if(key.startsWith('wind_speed_100m')) (p.dk?g.dk:g.de).push(cf(v));
+        else if(p.dk&&key.startsWith('temperature_2m')) g.te.push(v); }});
+    if(g.dk.length&&g.de.length) m.set(Date.parse(ts+'Z'),{cfDK:avg(g.dk),cfDE:avg(g.de),temp:avg(g.te)});
+  });
+  if(!m.size) throw new Error('GFS-ensemblet gav ingen vinddata');
+  return m;
 }
 async function getWeather(){
   return aggregate(await omFetch(omUrl('api.open-meteo.com',['wind_speed_100m','shortwave_radiation','temperature_2m'],'past_days=36&forecast_days=16'),30000),'');
@@ -304,6 +324,23 @@ function normalWx(wx,cut){
   const out=acc.map(a=>a.n?{cfDK:a.cfDK/a.n,cfDE:a.cfDE/a.n,solDK:a.solDK/a.n,solDE:a.solDE/a.n,temp:a.temp/a.n}:null);
   return t=>out[hourDK(t)];
 }
+// Uge-tendens: normalt vejr plus halvdelen af ensemblets afvigelse fra normalt, udglattet over 7 døgn.
+// Ensemblet kalibreres først mod vejrprognosen på de første 7 døgn, så forskelle mellem modellerne ikke tæller som afvigelse.
+const TREND_KEYS=['cfDK','cfDE','temp'], TREND_SHRINK=.5;
+function trendWx(ens,wx,nw,now){
+  if(!ens?.size) return null;
+  const off={}; for(const k of TREND_KEYS){ const d=[]; for(const [t,e] of ens){ const w=wx.get(t); if(t>now&&t<=now+7*D&&w&&e[k]!=null) d.push(w[k]-e[k]); } off[k]=avg(d); }
+  if(off.cfDK==null||off.cfDE==null) return null;
+  const days=new Map(); for(const [t,e] of ens){ if(t<=now) continue; const k=dayKey(t); if(!days.has(k)) days.set(k,[]); days.get(k).push(e); }
+  const keys=[...days.keys()].sort();
+  const daily=keys.map(k=>Object.fromEntries(TREND_KEYS.map(f=>[f,avg(days.get(k).map(e=>e[f]).filter(v=>v!=null))]).map(([f,v])=>[f,v==null?null:v+(off[f]??0)])));
+  const nd=Object.fromEntries(TREND_KEYS.map(f=>[f,avg(Array.from({length:24},(_,h)=>nw(now+h*H)?.[f]).filter(v=>v!=null))]));
+  const anom=new Map(keys.map((k,i)=>{ const win=daily.slice(Math.max(0,i-3),i+4);
+    return [k,Object.fromEntries(TREND_KEYS.map(f=>{ const m=avg(win.map(d=>d[f]).filter(v=>v!=null)); return [f,m==null||nd[f]==null?0:TREND_SHRINK*(m-nd[f])]; }))]; }));
+  const last=Math.max(...ens.keys()), c01=v=>Math.max(0,Math.min(1,v));
+  return t=>{ const a=t<=last&&anom.get(dayKey(t)), n=nw(t); if(!a||!n) return null;
+    return {...n,cfDK:c01(n.cfDK+a.cfDK),cfDE:c01(n.cfDE+a.cfDE),temp:n.temp+a.temp}; };
+}
 // Hvor meget vejrprognosen tæller N døgn frem: fuldt til dag 10, derefter gradvist mod normalt vejr, intet efter dag 16.
 const FC_FULL=10, FC_END=16, MAX_DAYS=30;
 const wxWeight=ld=>ld<=FC_FULL?1:ld>=FC_END?0:(FC_END-ld)/(FC_END-FC_FULL);
@@ -320,17 +357,17 @@ function normalError(known,wx,cut){
 
 // Prognose fra nu og op til 30 døgn frem. Usikkerhedsbåndet bruger backtestens fejl pr. døgn frem til dag 7,
 // derefter vokser det mod fejlen med normalt vejr.
-function forecast(known,wx,bt,now){
+function forecast(known,wx,bt,now,ens){
   const cut=known.at(-1).t+H, base=wx.size?trainAt(known,wx,cut):null, fc=[];
   if(!base) return {fc,errNormal:NaN};
-  const nw=normalWx(wx,cut), mae7=bt.byLead[7]?.mae ?? 50, errN=Math.max(mae7,normalError(known,wx,cut)||mae7);
+  const nw=normalWx(wx,cut), tw=trendWx(ens,wx,nw,now), mae7=bt.byLead[7]?.mae ?? 50, errN=Math.max(mae7,normalError(known,wx,cut)||mae7);
   const maeOf=ld=>ld<=7?(bt.byLead[Math.max(1,ld)]?.mae ?? mae7):ld>=FC_END?errN:mae7+(errN-mae7)*(ld-7)/(FC_END-7);
   const endT=Math.floor((now+MAX_DAYS*D)/H)*H;
   for(let t=cut;t<=endT;t+=H){
-    const ld=leadDay(t,now), a=wx.has(t)?wxWeight(ld):0, w=blend(wx.get(t),nw(t),a); if(!w) continue;
+    const ld=leadDay(t,now), a=wx.has(t)?wxWeight(ld):0, tr=a<1&&tw?tw(t):null, w=blend(wx.get(t),tr||nw(t),a); if(!w) continue;
     const m=base(t,w), sd=maeOf(ld)*1.25;
-    fc.push({t,p:m,lo:m-1.28*sd,hi:m+1.28*sd,kind:a>=1?'fc':a>0?'rough':'normal'});}
-  return {fc,errNormal:errN};
+    fc.push({t,p:m,lo:m-1.28*sd,hi:m+1.28*sd,kind:a>=1?'fc':a>0?'rough':tr?'trend':'normal'});}
+  return {fc,errNormal:errN,trend:!!tw};
 }
 const maeDays13=bt=>{const a=[1,2,3].map(d=>bt.byLead[d]).filter(Boolean); return a.length?a.reduce((s,x)=>s+x.mae*x.n,0)/a.reduce((s,x)=>s+x.n,0):NaN;};
 
@@ -340,6 +377,7 @@ async function load(){
   $('error').innerHTML=''; $('status').textContent='Henter priser og vejrdata…';
   try{
     const soft=p=>p.then(v=>({v}),e=>{console.error(e);return {e};});
+    const ensP=BACKTEST_MODE?null:soft(getEnsemble());   // langsomt og stort; siden vises uden og opdateres, når det kommer
     const [q,wxRes,btRes]=await Promise.all([getPrices(),soft(getWeather()),BACKTEST_MODE?{}:soft(getBacktest())]);
     const wx=wxRes.v||new Map();
     const hourly=new Map();
@@ -349,11 +387,18 @@ async function load(){
 
     const bt=btRes.v||{byLead:{}};
     const F=forecast(known,wx,bt,now);
-    state={q,known,fc:F.fc,errNormal:F.errNormal,mae:maeDays13(bt),bt,now,lastKnown,
+    state={q,known,wx,fc:F.fc,errNormal:F.errNormal,mae:maeDays13(bt),bt,now,lastKnown,trendStatus:ensP?'pending':'off',
       btStatus:BACKTEST_MODE?'pending':btRes.v?'done':'failed'};
     if(!state.fc.length) $('error').innerHTML=`<div class="err">Prognosen mangler, ${wxRes.e?'fordi vejrdata ikke kunne hentes ('+wxRes.e.message+')':'fordi der er for lidt prishistorik at træne på'}. Kendte priser vises stadig.</div>`;
     render();
     $('status').textContent=`Strømpris Vestdanmark (DK1). Nye priser modtaget ${state_updated?fDay.format(new Date(state_updated))+' kl. '+fHour.format(new Date(state_updated)):'ukendt'}, kendte priser til ${fDay.format(lastKnown+H)} kl. ${fHour.format(lastKnown+H)}`;
+
+    if(ensP){
+      const ensRes=await ensP; if(id!==loadId) return;
+      if(ensRes.v&&state.fc.length){ const F2=forecast(known,wx,state.bt,state.now,ensRes.v); Object.assign(state,{fc:F2.fc,errNormal:F2.errNormal,trendStatus:F2.trend?'done':'failed'}); }
+      else { state.trendStatus='failed'; state.trendError=ensRes.e?.message; }
+      render();
+    }
 
     if(BACKTEST_MODE&&wx.size){
       // Kun ærlig backtest gemmes; fejler de gamle prognoser, beholder workflowet den forrige fil
@@ -380,6 +425,7 @@ function render(){
   const hzName=hz===30?'1 måned':hz+' dage';
   $('hzTitle').textContent=hzName; $('hzLegend').textContent=`Farver er relative til de viste ${hz+1} døgn`;
   $('errNormal').textContent=isFinite(errNormal)?` (lige nu ca. ± ${(errNormal*($('vat').checked?1.25:1)).toFixed(0)} øre/kWh pr. time)`:'';
+  $('trendStatus').textContent={pending:'Uge-tendensen hentes…',done:'Uge-tendensen fra GFS-ensemblet er med lige nu.',failed:'Uge-tendensen kunne ikke hentes lige nu, så langt ude bruges kun normalt vejr.',off:''}[state.trendStatus]||'';
   const cur=q.find(r=>r.t<=now&&now<r.t+15*60e3)||q.filter(r=>r.t<=now).at(-1);
   const series=[...known.filter(r=>r.t>=now-24*H).map(r=>({...r,f:false})),...fc.map(r=>({...r,f:true}))];
   const vals=series.map(r=>r.p).sort((a,b)=>a-b), pct=p=>vals[Math.floor(p*(vals.length-1))];
@@ -400,9 +446,10 @@ function render(){
   // Døgn
   const days=new Map(); for(const r of series){const k=dayKey(r.t); if(!days.has(k)) days.set(k,[]); days.get(k).push(r);}
   const today=dayKey(now); const dayArr=[...days].filter(([k])=>k>=today);
-  const kindOf=a=>a.some(r=>r.kind==='normal')?'normal':a.some(r=>r.kind==='rough')?'rough':'fc';
-  const srcTag=a=>a.every(r=>r.f)?{fc:'Prognose',rough:'Grov prognose',normal:'Normalt vejr'}[kindOf(a)]:a.some(r=>r.f)?'Delvis kendt':'Kendt';
-  const fcDays=dayArr.filter(([,a])=>a.every(r=>r.f)&&a.length>=20&&a.every(r=>r.kind!=='normal')).map(([k,a])=>({k,a,avg:a.reduce((s,r)=>s+r.p,0)/a.length}));
+  const far=r=>r.kind==='trend'||r.kind==='normal';
+  const kindOf=a=>['normal','trend','rough'].find(k=>a.some(r=>r.kind===k))||'fc';
+  const srcTag=a=>a.every(r=>r.f)?{fc:'Prognose',rough:'Grov prognose',trend:'Uge-tendens',normal:'Normalt vejr'}[kindOf(a)]:a.some(r=>r.f)?'Delvis kendt':'Kendt';
+  const fcDays=dayArr.filter(([,a])=>a.every(r=>r.f)&&a.length>=20&&!a.some(far)).map(([k,a])=>({k,a,avg:a.reduce((s,r)=>s+r.p,0)/a.length}));
   const cd=fcDays.sort((a,b)=>a.avg-b.avg)[0];
   $('cheapDay').textContent=cd?`${fDay.format(cd.a[0].t)}, ca. ${fmt(cd.avg)} øre i snit`:'–';
   $('mae').textContent=isFinite(mae)?`± ${(mae*($('vat').checked?1.25:1)).toFixed(0)} øre/kWh pr. time`:'–';
@@ -418,7 +465,7 @@ function render(){
   const avgs=dayAvg.map(d=>d.avg), aLo=Math.min(...avgs), aHi=Math.max(...avgs), tomorrow=dayKey(new Date(Date.parse(today+'T12:00:00Z')+D));
   $('dayCards').innerHTML=dayAvg.map(d=>{const c=color(d.avg,aLo,aHi), w=Math.max(4,Math.round(disp(d.avg)/Math.max(...avgs.map(disp))*100));
     const name=d.k===today?'I dag':d.k===tomorrow?'I morgen':fDay.format(d.a[0].t);
-    return `<div class="daycard${d.anyF?' fc':''}${d.k===today?' today':''}${d.allF&&kindOf(d.a)==='normal'?' clim':''}" style="--c:${c}" title="${fDay.format(d.a[0].t)}">
+    return `<div class="daycard${d.anyF?' fc':''}${d.k===today?' today':''}${d.allF&&d.a.every(far)?' clim':''}" style="--c:${c}" title="${fDay.format(d.a[0].t)}">
       <div class="d">${name}</div>
       <div class="avg">${d.anyF?'<small style="margin:0 .2em 0 0">ca.</small>':''}${fmt(d.avg)}<small>øre</small></div>
       <div class="bar"><i style="width:${w}%"></i></div>
@@ -430,7 +477,7 @@ function render(){
   for(const [k,a] of dayArr){const byH=new Map(a.map(r=>[hourDK(r.t),r]));
     g+=`<div class="lbl">${fDay.format(a[0].t)}</div>`;
     for(let h=0;h<24;h++){const r=byH.get(h);
-      g+=r?`<div class="cell${r.f?' fc':''}${now>=r.t&&now<r.t+H?' now':''}" style="background:${color(r.p,lo,hi)}" title="${fDay.format(r.t)} kl. ${fHour.format(r.t)}: ${fmt(r.p)} øre${r.f?' (prognose)':''}"></div>`:'<div></div>';}}
+      g+=r?`<div class="cell${r.f?' fc':''}${far(r)?' far':''}${now>=r.t&&now<r.t+H?' now':''}" style="background:${color(r.p,lo,hi)}" title="${fDay.format(r.t)} kl. ${fHour.format(r.t)}: ${fmt(r.p)} øre${far(r)?' (uge-tendens)':r.f?' (prognose)':''}"></div>`:'<div></div>';}}
   $('grid').innerHTML=g;
 
   // Graf
@@ -443,7 +490,8 @@ function render(){
   if(chart) chart.destroy();
   chart=new Chart($('chart'),{type:'line',data:{datasets:[
     {label:'Kendt pris',data:act,borderColor:ink,borderWidth:2,pointRadius:0,stepped:true},
-    {label:'Prognose',data:pf,borderColor:sea,borderDash:[6,4],borderWidth:2,pointRadius:0},
+    {label:'Prognose',data:pf,borderColor:sea,borderDash:[6,4],borderWidth:2,pointRadius:0,
+      segment:{borderColor:c=>far(fc[c.p1DataIndex])?sea+'66':undefined,borderWidth:c=>far(fc[c.p1DataIndex])?1:undefined}},
     {label:'Døgnsnit',data:avgLine,borderColor:muted,borderWidth:2,borderDash:[2,3],pointRadius:0,stepped:true},
     {label:'80 % interval',data:band1,borderWidth:0,pointRadius:0,backgroundColor:sea+'33',fill:'+1'},
     {label:'_lo',data:band0,borderWidth:0,pointRadius:0}]},
