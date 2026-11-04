@@ -52,5 +52,11 @@ jobs:
           git commit -m "Opdater data:$CHANGED $(date -u +%FT%H:%MZ)"
           # Filer hvor kun tidsstemplet er ændret smides væk, ellers nægter git at rebase
           git checkout -- .
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          # Op til 3 forsøg: GitHub svarer af og til med en midlertidig serverfejl, eller et andet workflow har lige pushet
+          for i in 1 2 3; do
+            if git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}"; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            echo "Forsøg $i fejlede, prøver igen om $((i*15)) sek."
+            sleep $((i*15))
+          done
+          exit 1
