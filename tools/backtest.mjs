@@ -9,12 +9,17 @@ const t0 = Date.now(), sec = () => ((Date.now() - t0) / 1000).toFixed(1) + ' s';
 p.on('console', m => m.type() === 'error' && console.log(`[${sec()}] browser:`, m.text().slice(0, 200)));
 p.on('requestfailed', r => console.log(`[${sec()}] kald fejlede: ${r.failure()?.errorText} ${r.url().slice(0, 100)}`));
 await p.goto(url);
-await p.waitForFunction(() => document.getElementById('status').textContent !== 'Henter priser og vejrdata…', null, { timeout: 120000 });
+await p.waitForFunction(() => document.getElementById('status').textContent !== 'Henter priser og vejrdata…', null, { timeout: 10 * 60e3 });   // vejrdata kan tage flere forsøg
 console.log(`[${sec()}] Priser og prognose vist`);
 await p.waitForFunction(() => state?.btStatus !== 'pending', null, { timeout: 30 * 60e3 });
-const r = await p.evaluate(() => ({ status: state.btStatus, error: state.btError, bt: state.bt }));
+const r = await p.evaluate(() => ({ status: state.btStatus, error: state.btError, external: state.btExternal, bt: state.bt }));
 await b.close();
-if (r.status !== 'done') { console.log(`Backtesten fejlede: ${r.error}. data/backtest.json beholdes uændret.`); process.exit(1); }
+if (r.status !== 'done') {
+  // Er Open-Meteo nede, er det ikke en fejl i koden: siden viser den forrige backtest, og næste planlagte kørsel prøver igen.
+  // Derfor kun en advarsel, så der ikke sendes en fejlmail. Alt andet får kørslen til at fejle.
+  if (r.external) { console.log(`::warning::Backtesten blev ikke regnet, fordi Open-Meteo fejlede (${r.error}). data/backtest.json beholdes uændret.`); process.exit(0); }
+  console.log(`Backtesten fejlede: ${r.error}. data/backtest.json beholdes uændret.`); process.exit(1);
+}
 console.log(`[${sec()}] Backtest færdig`);
 
 writeFileSync('data/backtest.json', JSON.stringify(r.bt) + '\n');
