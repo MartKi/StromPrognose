@@ -232,8 +232,14 @@ async function getEnsemble(){
   if(!m.size) throw new Error('GFS-ensemblet gav ingen vinddata');
   return m;
 }
+// Open-Meteo svarer af og til ikke i et minuts tid, så der prøves igen. Backtesten har god tid og prøver flere gange.
 async function getWeather(){
-  return aggregate(await omFetch(omUrl('api.open-meteo.com',['wind_speed_100m','shortwave_radiation','temperature_2m'],'past_days=36&forecast_days=16'),30000),'');
+  const url=omUrl('api.open-meteo.com',['wind_speed_100m','shortwave_radiation','temperature_2m'],'past_days=36&forecast_days=16');
+  const tries=BACKTEST_MODE?4:2;
+  for(let i=1;;i++){
+    try{ return aggregate(await omFetch(url,BACKTEST_MODE?60000:30000),''); }
+    catch(e){ if(i>=tries) throw e; console.error(`Vejrdata, forsøg ${i} fejlede: ${e.message}`); await new Promise(r=>setTimeout(r,(BACKTEST_MODE?20000:3000)*i)); }
+  }
 }
 // Backtesten regnes én gang i døgnet af workflowet Backtest og gemmes i data/backtest.json, så siden ikke
 // afhænger af Open-Meteos tjeneste for gamle prognoser, som kan være langsom eller nede.
@@ -400,10 +406,13 @@ async function load(){
       render();
     }
 
+    // Uden vejrdata kan backtesten ikke regnes. Så meldes den som fejlet hos Open-Meteo, og workflowet beholder den forrige fil.
+    if(BACKTEST_MODE&&!wx.size){ Object.assign(state,{btStatus:'failed',btExternal:true,btError:'vejrdata: '+(wxRes.e?.message||'tomme')}); render(); }
+
     if(BACKTEST_MODE&&wx.size){
       // Kun ærlig backtest gemmes; fejler de gamle prognoser, beholder workflowet den forrige fil
       const pastRes=await soft(getPastForecasts()); if(id!==loadId) return;
-      if(pastRes.e){ state.btStatus='failed'; state.btError=pastRes.e.message; render(); return; }
+      if(pastRes.e){ Object.assign(state,{btStatus:'failed',btExternal:true,btError:'gamle prognoser: '+pastRes.e.message}); render(); return; }
       const res=backtest(known,pastRes.v,wx);
       Object.assign(state,{bt:{...res,updated:new Date().toISOString()},btStatus:'done'});
       state.mae=maeDays13(state.bt); Object.assign(state,(({fc,errNormal})=>({fc,errNormal}))(forecast(known,wx,state.bt,now)));
@@ -412,6 +421,7 @@ async function load(){
   }catch(e){
     const m=e.message.replace(/(https:\/\/\S+)/,'<a href="$1" target="_blank" style="color:#fff;word-break:break-all">$1</a>');
     $('error').innerHTML=`<div class="err">Kunne ikke hente data: ${m}</div>`; console.error(e);
+    if(BACKTEST_MODE&&state?.btStatus==='pending') Object.assign(state,{btStatus:'failed',btError:e.message});   // så backtest-scriptet ikke venter forgæves
     $('status').textContent='Ingen data';
   }
 }
@@ -510,7 +520,7 @@ $('addon').oninput=()=>state&&render();
 $('refresh').onclick=load;
 load();
 setInterval(()=>{ if(state){ state.now=Date.now(); render(); } },60e3);   // flyt "nu" hvert minut
-setInterval(load,30*60e3);                                               // hent nye data hver halve time
+if(!BACKTEST_MODE) setInterval(load,30*60e3);                           // hent nye data hver halve time (ikke under backtesten)
 </script>
 </body>
 </html>
